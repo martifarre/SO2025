@@ -34,7 +34,6 @@ char *global_cmd = NULL;
 *
 ************************************************/
 void free_config() {
-    // Liberar la memoria asignada para cada campo de la configuración
     free(config.username);
     free(config.directory);
     free(config.server_ip);
@@ -48,68 +47,56 @@ void free_config() {
 *
 ************************************************/
 void read_config_file(const char *config_file) {
-    // Abrir el archivo de configuración en modo solo lectura
     int fd = open(config_file, O_RDONLY);
     if (fd == -1) {
-        // Error al abrir el archivo de configuración
         write(STDOUT_FILENO, "Error: Cannot open configuration file\n", 39);
         exit(1);
     }
 
-    // Leer el nombre de usuario
     config.username = readUntil(fd, '\n');
     if (strchr(config.username, '$') != NULL) {
-        // Error: carácter inválido '$' en el nombre de usuario
         write(STDOUT_FILENO, "Error: Invalid character '$' in username\n", 41);
         free_config();
         close(fd);
         exit(1);
     }
-    replace(config.username, '\r', '\0'); // Eliminar el carácter '\r' al final
+    replace(config.username, '\r', '\0');
 
     if (config.username == NULL) {
-        // Error al leer el nombre de usuario
         write(STDOUT_FILENO, "Error: Failed to read username\n", 31);
         free_config();
         close(fd);
         exit(1);
     }
 
-    // Leer el directorio
     config.directory = readUntil(fd, '\n');
     replace(config.directory, '\r', '\0');
     if (config.directory == NULL) {
-        // Error al leer el directorio
         write(STDOUT_FILENO, "Error: Failed to read directory\n", 32);
         free_config();
         close(fd);
         exit(1);
     }
 
-    // Leer la IP del servidor
     config.server_ip = readUntil(fd, '\n');
     replace(config.server_ip, '\r', '\0');
     if (config.server_ip == NULL) {
-        // Error al leer la IP del servidor
         write(STDOUT_FILENO, "Error: Failed to read server IP\n", 33);
         free_config();
         close(fd);
         exit(1);
     }
 
-    // Leer el puerto del servidor
     char *port_str = readUntil(fd, '\n');
     if (port_str == NULL) {
-        // Error al leer el puerto del servidor
         write(STDOUT_FILENO, "Error: Failed to read server port\n", 34);
         free_config();
         close(fd);
         exit(1);
     }
     config.server_port = atoi(port_str);
-    free(port_str);  // Liberar la memoria para la cadena del puerto
+    free(port_str);
 
-    // Cerrar el archivo de configuración
     close(fd);
 }
 
@@ -153,19 +140,16 @@ void list_files(const char *directory, const char **extensions, const char *labe
     char **file_list = NULL;
     char* buffer;
 
-    // Abrir el directorio
     dir = opendir(directory);
     if (dir == NULL) {
         return;
     }
 
-    // Leer las entradas del directorio
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_type == DT_DIR) {
             continue;
         }
         if (has_extension(entry->d_name, extensions)) {
-            // Agregar archivo a la lista
             file_list = realloc(file_list, sizeof(char *) * (count + 1));
             file_list[count] = strdup(entry->d_name);
             count++;
@@ -173,7 +157,6 @@ void list_files(const char *directory, const char **extensions, const char *labe
     }
     closedir(dir);
 
-    // Imprimir la lista de archivos
     asprintf(&buffer, "There are %d %s available:\n", count, label);
     print_text(buffer);
     free(buffer);
@@ -274,33 +257,26 @@ void CTRLC(int signum) {
 ************************************************/
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        // Uso incorrecto del programa
         write(STDOUT_FILENO, "Usage: Fleck <config_file>\n", 27);
         exit(1);
     }
 
-    // Registrar el manejador de la señal CTRL+C
     signal(SIGINT, CTRLC);
     
-    // Leer el archivo de configuración
     read_config_file(argv[1]);
 
     char* msg;
 
-    // Imprimir mensaje de inicialización del usuario
     asprintf(&msg, "%s user initialized\n", config.username);
     print_text(msg);
     free(msg);
 
-    // Imprimir detalles de la configuración
     asprintf(&msg, "%s, %s, %s, %d\n", config.username, config.directory, config.server_ip, config.server_port);
     print_text(msg);
     free(msg);
 
-    // Ejecutar el terminal
     terminal();
 
-    // Liberar la memoria asignada
     free_config();
 
     return 0;
