@@ -200,3 +200,107 @@ bool read_line(int fd, int *read_bytes, char **line) {
     (*line)[*read_bytes] = '\0';
     return is_eof;
 }
+
+/***********************************************
+*
+* @Finalidad: Extraer el `x`-ésimo token de una cadena `message` separada por `&`, comenzando desde `message[3]` y deteniéndose en `message[249]`.
+* @Parametros: char* message - La cadena de caracteres de la cual se desea extraer el token.
+*              int x - El índice del token que se desea extraer (0 para el primer token, 1 para el segundo, etc.).
+* @Retorno: char* - Un puntero al `x`-ésimo token en la cadena `message`. Si no se encuentra el token, retorna la copia de la cadena.
+*
+************************************************/
+char* getXFromMessage(const char* message, int x) {
+    // Ajustar el puntero para que apunte a message[3]
+    const char *start = message + 3;
+
+    // Crear una copia de la cadena para que strtok no altere el original
+    char temp[247];
+    strncpy(temp, start, 246); // Copia hasta 246 caracteres desde start
+    temp[246] = '\0';          // Asegura terminación en nulo
+
+    // Inicializar el primer token
+    char *token = strtok(temp, "&");
+
+    // Avanzar a través de los tokens hasta llegar al `x`-ésimo token
+    for (int i = 0; i < x; i++) {
+        token = strtok(NULL, "&");
+        if (token == NULL) {
+            return NULL; // Si no hay suficientes tokens, retorna NULL
+        }
+    }
+
+    // Retornar una copia del `x`-ésimo token
+    return token ? strdup(token) : NULL;
+}
+
+/*
+uint16_t calculate_checksum(char *message, int length) {
+    uint32_t sum = 0;
+    for (int i = 0; i < length; i++) {
+        sum += (uint8_t)message[i];
+    }
+    return sum % 65536;
+}
+
+int validate_checksum(char *message) {
+    uint16_t received_checksum = (message[250] << 8) | message[251];
+
+    uint16_t calculated_checksum = calculate_checksum(message, 250);
+
+    printf("Received checksum: %u\n", received_checksum);
+    printf("Calculated checksum: %u\n", calculated_checksum);
+
+    return received_checksum == calculated_checksum;
+}
+*/
+
+char *buildMessage(char *type, char *data) {
+    char *message = (char *)malloc(256 * sizeof(char));
+    memset(message, '\0', 256);
+
+    // Type (1 Byte)
+    message[0] = type[0];
+    message[1] = '0';
+    message[2] = '0';
+
+    /*
+    // Data Length (2 Bytes)
+    uint16_t data_len = (uint16_t)strlen(data);
+
+    message[1] = (data_len >> 8) & 0xFF;
+    message[2] = data_len & 0xFF;
+    */
+
+    // Data (up to 245 Bytes)
+    for (int i = 0; i < strlen(data) && i < 247; i++) {
+        message[3 + i] = data[i];
+    }
+
+    /*
+    // Checksum (2 Bytes)
+    uint16_t checksum = calculate_checksum(message, 250);
+    message[250] = (checksum >> 8) & 0xFF;
+    message[251] = checksum & 0xFF;
+
+    // Timestamp (4 Bytes)
+    int32_t timestamp = (int32_t)time(NULL);
+    memcpy(&message[252], &timestamp, 4);
+    */
+    return message;
+}
+
+void sendMessageToSocket(int socket, char *type, char *data) {
+    char *messageToSend = buildMessage(type, data);
+
+    if (messageToSend == NULL) {
+        print_error("Failed to build message correctly.\n");
+        return;
+    }
+    
+    printf("\n\nSending message: %s\n\n", messageToSend);
+    // Send the message through the socket
+    write(socket, messageToSend, 256);
+
+    // Free the message after sending it
+    free(messageToSend);
+}

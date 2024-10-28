@@ -1,11 +1,11 @@
 CC = gcc
 CFLAGS = -Wall
-DEPS = fleck/fleck.h utils/utils.h
+DEPS = fleck/fleck.h utils/utils.h linkedlist/linkedlist.h
 
-OBJ_FLECK = fleck/fleck.o utils/utils.o
-OBJ_ENIGMA = enigma/enigma.o utils/utils.o
-OBJ_GOTHAM = gotham/gotham.o utils/utils.o
-OBJ_HARLEY = harley/harley.o utils/utils.o
+OBJ_FLECK = fleck/fleck.o utils/utils.o linkedlist/linkedlist.o
+OBJ_ENIGMA = enigma/enigma.o utils/utils.o linkedlist/linkedlist.o
+OBJ_GOTHAM = gotham/gotham.o utils/utils.o linkedlist/linkedlist.o
+OBJ_HARLEY = harley/harley.o utils/utils.o linkedlist/linkedlist.o
 
 BIN_DIR = bin
 BIN_FLECK = $(BIN_DIR)/fleck
@@ -36,4 +36,4 @@ $(BIN_HARLEY): $(OBJ_HARLEY)
 .PHONY: clean
 
 clean:
-	rm -f $(BIN_FLECK) $(BIN_ENIGMA) $(BIN_GOTHAM) $(BIN_HARLEY) $(OBJ_FLECK) $(OBJ_ENIGMA) $(OBJ_GOTHAM) $(OBJ_HARLEY)
+	rm -f $(BIN_FLECK) $(BIN_ENIGMA) $(BIN_GOTHAM) $(BIN_HARLEY) $(OBJ_FLECK) $(OBJ_ENIGMA) $(OBJ_GOTHAM) $(OBJ_HARLEY) linkedlist/linkedlist.o

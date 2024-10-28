@@ -15,9 +15,9 @@
 // Definición de la estructura EnigmaConfig para almacenar la configuración
 typedef struct {
     char *gotham_server_ip;
-    int gotham_server_port;
+    char *gotham_server_port; // Cambiado a char*
     char *enigma_server_ip;
-    int enigma_server_port;
+    char *enigma_server_port; // Cambiado a char*
     char *directory;
     char *worker_type;
 } EnigmaConfig;
@@ -34,7 +34,9 @@ EnigmaConfig config;
 ************************************************/
 void free_config() {
     free(config.gotham_server_ip);
+    free(config.gotham_server_port); // Liberar la memoria del puerto
     free(config.enigma_server_ip);
+    free(config.enigma_server_port); // Liberar la memoria del puerto
     free(config.directory);
     free(config.worker_type);
 }
@@ -61,15 +63,14 @@ void read_config_file(const char *config_file) {
     }
     replace(config.gotham_server_ip, '\r', '\0');
 
-    char *port_str = readUntil(fd, '\n');
-    if (port_str == NULL) {
+    config.gotham_server_port = readUntil(fd, '\n'); // Leer el puerto como char*
+    if (config.gotham_server_port == NULL) {
         write(STDOUT_FILENO, "Error: Failed to read Gotham server port\n", 41);
         free_config();
         close(fd);
         exit(1);
     }
-    config.gotham_server_port = atoi(port_str);
-    free(port_str);
+    replace(config.gotham_server_port, '\r', '\0'); // Eliminar el carácter '\r' al final
 
     config.enigma_server_ip = readUntil(fd, '\n');
     if (config.enigma_server_ip == NULL) {
@@ -80,15 +81,14 @@ void read_config_file(const char *config_file) {
     }
     replace(config.enigma_server_ip, '\r', '\0');
 
-    port_str = readUntil(fd, '\n');
-    if (port_str == NULL) {
+    config.enigma_server_port = readUntil(fd, '\n'); // Leer el puerto como char*
+    if (config.enigma_server_port == NULL) {
         write(STDOUT_FILENO, "Error: Failed to read Enigma server port\n", 42);
         free_config();
         close(fd);
         exit(1);
     }
-    config.enigma_server_port = atoi(port_str);
-    free(port_str);
+    replace(config.enigma_server_port, '\r', '\0'); // Eliminar el carácter '\r' al final
 
     config.directory = readUntil(fd, '\n');
     if (config.directory == NULL) {
@@ -118,6 +118,117 @@ void read_config_file(const char *config_file) {
     close(fd);
 }
 
+int initSocket(char* incoming_Port, char* incoming_IP) {
+    uint16_t port;
+    int aux = atoi (incoming_Port);
+
+    if (aux < 1 || aux > 65535) {
+        write(STDOUT_FILENO, "Error: Invalid port\n", 21);
+        exit (EXIT_FAILURE);
+    }
+    port = aux;
+        
+
+    int sockfd;
+    sockfd = socket (AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sockfd < 0)
+    {
+        write(STDOUT_FILENO, "Error: Cannot create socket\n", 29);
+        exit (EXIT_FAILURE);
+    }
+
+    struct sockaddr_in s_addr;
+    memset (&s_addr, '\0', sizeof (s_addr));
+    s_addr.sin_family = AF_INET;
+    s_addr.sin_port = htons(port);
+
+    int result = inet_pton(AF_INET, incoming_IP, &s_addr.sin_addr);
+    if (result <= 0) {
+        write(STDOUT_FILENO, "Error: Cannot convert IP address\n", 34);
+        exit(EXIT_FAILURE);
+    }
+
+    if (bind (sockfd, (void *) &s_addr, sizeof (s_addr)) < 0) {
+        write(STDOUT_FILENO, "Error: Cannot bind socket\n", 27);
+        exit (EXIT_FAILURE);
+    }
+
+    if(listen (sockfd, 5) < 0) {
+        write(STDOUT_FILENO, "Error: Cannot listen on socket\n", 31);
+        exit (EXIT_FAILURE);
+    }
+
+    return sockfd;
+
+}
+
+int createSocket(){
+    char* message = (char*)malloc(sizeof(char) * 256);
+    sprintf(message, "Connecting to %s Server to the Gotham system...\n", config.directory);
+    write(STDOUT_FILENO, message, strlen(message));
+    free(message);
+
+    uint16_t port;
+    int aux = atoi(config.gotham_server_port);
+    if (aux < 1 || aux > 65535) {
+        write(STDOUT_FILENO, "Error: Invalid port\n", 21);
+        exit (EXIT_FAILURE);
+
+    }
+    port = aux;
+
+    struct in_addr ip_addr;
+    if (inet_pton(AF_INET, config.gotham_server_ip, &ip_addr) != 1) {
+        write(STDOUT_FILENO, "Error: Cannot convert IP address\n", 34);
+        exit (EXIT_FAILURE);
+    }
+
+    int sockfd;
+    sockfd = socket (AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sockfd < 0) {
+        write(STDOUT_FILENO, "Error: Cannot create socket\n", 29);
+        exit (EXIT_FAILURE);
+    }
+
+    struct sockaddr_in s_addr;
+    memset (&s_addr, '\0', sizeof (s_addr));
+    s_addr.sin_family = AF_INET;
+    s_addr.sin_port = htons (port);
+    s_addr.sin_addr = ip_addr;
+
+    if (connect (sockfd, (void *) &s_addr, sizeof (s_addr)) < 0) {
+        write(STDOUT_FILENO, "Error: Cannot connect to Gotham\n", 33);
+        exit (EXIT_FAILURE);
+    }
+
+    return sockfd;
+}
+
+void initServer() {
+    int socket_fd = initSocket(config.enigma_server_port, config.enigma_server_ip);
+    int newsock;
+    struct sockaddr_in c_addr;
+    socklen_t c_len = sizeof (c_addr);
+
+    
+    while(1) {
+        char *data = (char *)malloc(sizeof(char) * 256);
+        char *message = (char *)malloc(sizeof(char) * 256);
+        newsock = accept(socket_fd, (void *) &c_addr, &c_len);
+        if (newsock < 0) {
+            write(STDOUT_FILENO, "Error: Cannot accept connection\n", 33);
+            exit (EXIT_FAILURE);
+        }
+
+        read(newsock, message, 256);
+        sprintf(data, "Fleck username: %s, File to distort: %s", getXFromMessage(message, 0), getXFromMessage(message, 1));
+        write(STDOUT_FILENO, data, strlen(data));
+
+        sendMessageToSocket(newsock, "3", "OK");
+        close(newsock);
+    }
+}
+
 /***********************************************
 *
 * @Finalidad: Función principal del programa. Lee el archivo de configuración y muestra los detalles.
@@ -135,29 +246,33 @@ int main(int argc, char *argv[]) {
     read_config_file(argv[1]);
 
     char *msg;
+    char *data = (char *)malloc(sizeof(char) * 256);
 
     asprintf(&msg, "Enigma worker initialized\n");
     print_text(msg);
     free(msg);
 
-    asprintf(&msg, "Gotham server IP: %s, Port: %d\n",
-             config.gotham_server_ip, config.gotham_server_port);
-    print_text(msg);
-    free(msg);
+    int sockfd = createSocket();
+    
+    sprintf(data, "[%s&%s&%s]\n", config.worker_type, config.enigma_server_ip, config.enigma_server_port);
+    sendMessageToSocket(sockfd, "2", data);
+        
+    memset(data, '\0', 256);
+    read(sockfd, data, 256);
 
-    asprintf(&msg, "Enigma server IP: %s, Port: %d\n",
-             config.enigma_server_ip, config.enigma_server_port);
-    print_text(msg);
-    free(msg);
+    /*
+    if (validate_checksum(data)) {
+        write(STDOUT_FILENO, "Checksum valid\n", 15);
+    } else {
+        write(STDOUT_FILENO, "Checksum invalid\n", 17);
+    }
+    */
 
-    asprintf(&msg, "Directory: %s\n", config.directory);
-    print_text(msg);
-    free(msg);
+    close(sockfd);
 
-    asprintf(&msg, "Worker type: %s\n", config.worker_type);
-    print_text(msg);
-    free(msg);
-
+    initServer();
+    
+    free(data); 
     free_config();
 
     return 0;
