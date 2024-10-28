@@ -1,5 +1,6 @@
 CC = gcc
 CFLAGS = -Wall
+LDFLAGS = -lpthread
 DEPS = fleck/fleck.h utils/utils.h linkedlist/linkedlist.h
 
 OBJ_FLECK = fleck/fleck.o utils/utils.o linkedlist/linkedlist.o
@@ -28,7 +29,7 @@ $(BIN_ENIGMA): $(OBJ_ENIGMA)
 	$(CC) -o $@ $^ $(CFLAGS)
 
 $(BIN_GOTHAM): $(OBJ_GOTHAM)
-	$(CC) -o $@ $^ $(CFLAGS)
+	$(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
 
 $(BIN_HARLEY): $(OBJ_HARLEY)
 	$(CC) -o $@ $^ $(CFLAGS)

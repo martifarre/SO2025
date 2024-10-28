@@ -254,7 +254,7 @@ int main(int argc, char *argv[]) {
 
     int sockfd = createSocket();
     
-    sprintf(data, "[%s&%s&%s]\n", config.worker_type, config.enigma_server_ip, config.enigma_server_port);
+    sprintf(data, "%s&%s&%s", config.worker_type, config.enigma_server_ip, config.enigma_server_port);
     sendMessageToSocket(sockfd, "2", data);
         
     memset(data, '\0', 256);

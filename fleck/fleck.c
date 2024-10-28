@@ -27,6 +27,11 @@ FleckConfig config;
 char *global_cmd = NULL;
 int sockfd_G, sockfd_W;
 
+
+// Variable global para almacenar el estado de las distorsiones
+int ongoing_media_distortion = 0;
+int ongoing_text_distortion = 0;
+
 /***********************************************
 *
 * @Finalidad: Liberar la memoria asignada dinámicamente para la configuración.
@@ -276,6 +281,22 @@ void connectToGotham () {
 }
 
 void distortFile (char* type, char* filename) {
+    if (strcmp(type, "Media") == 0) {
+        if (ongoing_media_distortion) {
+            write(STDOUT_FILENO, "A media distortion is already in progress.\n", 44);
+            return;
+        } else {
+            ongoing_media_distortion = 1; 
+        }
+    } else if (strcmp(type, "Text") == 0) {
+        if (ongoing_text_distortion) {
+            write(STDOUT_FILENO, "A text distortion is already in progress.\n", 43);
+            return;
+        } else {
+            ongoing_text_distortion = 1; 
+        }
+    }
+
     char *message = (char *)malloc(256 * sizeof(char));
     char* data = (char*)malloc(256 * sizeof(char));
 
@@ -296,6 +317,16 @@ void distortFile (char* type, char* filename) {
         }
         close(sockfd_W);
     }
+
+    // Reset 
+    if (strcmp(type, "Media") == 0) {
+        ongoing_media_distortion = 0;
+    } else if (strcmp(type, "Text") == 0) {
+        ongoing_text_distortion = 0;
+    }
+
+    /*free(data);
+    free(message);*/
 }
 
 char* extract_substring(char* global_cmd) {
