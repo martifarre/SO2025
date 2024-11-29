@@ -25,13 +25,7 @@ typedef struct {
 GothamConfig config;
 
 LinkedList workers;
-/***********************************************
-*
-* @Finalidad: Liberar la memoria asignada dinámicamente para la configuración.
-* @Parametros: Ninguno.
-* @Retorno: Ninguno.
-*
-************************************************/
+
 void free_config() {
     free(config.fleck_server_ip);
     free(config.fleck_server_port); // Liberar la memoria del puerto
@@ -39,13 +33,7 @@ void free_config() {
     free(config.external_server_port); // Liberar la memoria del puerto
 }
 
-/***********************************************
-*
-* @Finalidad: Leer el archivo de configuración y almacenar los valores en la estructura GothamConfig.
-* @Parametros: const char *config_file - Ruta del archivo de configuración.
-* @Retorno: Ninguno.
-*
-************************************************/
+
 void read_config_file(const char *config_file) {
     int fd = open(config_file, O_RDONLY);
     
@@ -169,6 +157,7 @@ void searchWorkerAndSendInfo(int fleckSock, char* type) {
     }
 }
 
+
 void* threadFleck(void* arg) {
     int fleckSock = *(int*)arg;
     char* message = (char*)malloc(sizeof(char) * 256);
@@ -222,6 +211,7 @@ void* funcThreadWorkers() {
     int socket_fd = initSocket(config.external_server_port, config.external_server_ip);
     
     char* message = (char*)malloc(sizeof(char) * 256);
+    char* aux = (char*)malloc(sizeof(char) * 256);
     int newsock;
     struct sockaddr_in c_addr;
     socklen_t c_len = sizeof (c_addr);
@@ -247,6 +237,8 @@ void* funcThreadWorkers() {
             worker->worker_type = worker_type;
 
             LINKEDLIST_add(workers, worker);
+            sprintf(aux, "Worker of type %s added\n", worker_type);
+            write(STDOUT_FILENO, aux, strlen(aux));
             sendMessageToSocket(newsock, "2", "OK");
         }
 
@@ -258,22 +250,29 @@ void* funcThreadWorkers() {
         }
         */
 
+
         close(newsock);
     }
 }
-/***********************************************
-*
-* @Finalidad: Función principal del programa. Lee el archivo de configuración y muestra los detalles.
-* @Parametros: int argc - Número de argumentos.
-*              char *argv[] - Array de argumentos.
-* @Retorno: int - Código de salida del programa.
-*
-************************************************/
+
+void doLogout() {
+
+}
+
+void CTRLC(int signum) {
+    print_text("\nInterrupt signal CTRL+C received\n");
+    doLogout();
+    free_config();
+    exit(1);
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         write(STDOUT_FILENO, "Usage: Gotham <config_file>\n", 28);
         exit(1);
     }
+
+    signal(SIGINT, CTRLC);
 
     read_config_file(argv[1]);
 

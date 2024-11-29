@@ -28,6 +28,6 @@ uint16_t calculate_checksum(char *message, int length);
 int validate_checksum(char *message);
 char *buildMessage(char *type, char *data);
 void sendMessageToSocket(int socket, char *type, char *data);
-
+int isSocketOpen(int sockfd);   
     
 

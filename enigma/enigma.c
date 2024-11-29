@@ -164,7 +164,7 @@ int initSocket(char* incoming_Port, char* incoming_IP) {
 
 int createSocket(){
     char* message = (char*)malloc(sizeof(char) * 256);
-    sprintf(message, "Connecting to %s Server to the Gotham system...\n", config.directory);
+    sprintf(message, "Connecting %s Server to the Gotham system...\n", config.directory);
     write(STDOUT_FILENO, message, strlen(message));
     free(message);
 
@@ -197,7 +197,7 @@ int createSocket(){
     s_addr.sin_addr = ip_addr;
 
     if (connect (sockfd, (void *) &s_addr, sizeof (s_addr)) < 0) {
-        write(STDOUT_FILENO, "Error: Cannot connect to Gotham\n", 33);
+        write(STDOUT_FILENO, "Error: Cannot connect\n", 33);
         exit (EXIT_FAILURE);
     }
 
@@ -229,19 +229,32 @@ void initServer() {
     }
 }
 
-/***********************************************
-*
-* @Finalidad: Función principal del programa. Lee el archivo de configuración y muestra los detalles.
-* @Parametros: int argc - Número de argumentos.
-*              char *argv[] - Array de argumentos.
-* @Retorno: int - Código de salida del programa.
-*
-************************************************/
+void doLogout() {
+    if(isSocketOpen(newsock)) {
+        sendMessageToSocket(newsock, "3", "KO"); 
+        close(newsock);
+    }
+
+    int sockfd = createSocket();
+    sendMessageToSocket(newsock, "7", worker_type);
+    close(sockfd);
+}
+
+void CTRLC(int signum) {
+    print_text("\nInterrupt signal CTRL+C received\n");
+    doLogout();
+    free_config();
+    exit(1);
+}
+
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         write(STDOUT_FILENO, "Usage: Enigma <config_file>\n", 28);
         exit(1);
     }
+
+    signal(SIGINT, CTRLC);
 
     read_config_file(argv[1]);
 

@@ -15,14 +15,7 @@
 #define N_LINES 16
 #define M_CHARS 16
 
-/***********************************************
-*
-* @Finalidad: Leer caracteres de un archivo hasta encontrar un carácter específico.
-* @Parametros: int fd - Descriptor de archivo.
-*              char cEnd - Carácter que indica el final de la lectura.
-* @Retorno: char* - Cadena leída hasta el carácter especificado.
-*
-************************************************/
+
 char *readUntil(int fd, char cEnd) {
     int i = 0;
     ssize_t chars_read;
@@ -52,13 +45,7 @@ char *readUntil(int fd, char cEnd) {
     return buffer;
 }
 
-/***********************************************
-*
-* @Finalidad: Contar el número de palabras en una cadena.
-* @Parametros: char *str - Cadena de caracteres.
-* @Retorno: int - Número de palabras en la cadena.
-*
-************************************************/
+
 int count_words(char *str) {
     int words = 0;
     int is_space = 0;
@@ -73,13 +60,7 @@ int count_words(char *str) {
     return words;
 }
 
-/***********************************************
-*
-* @Finalidad: Eliminar espacios en blanco de una cadena.
-* @Parametros: char *str - Cadena de caracteres.
-* @Retorno: Ninguno.
-*
-************************************************/
+
 void strip_whitespace(char *str) {
     int read_index = 0, write_index = 0;
     int in_word = 0;  // Indica si estamos dentro de una palabra
@@ -107,13 +88,7 @@ void strip_whitespace(char *str) {
     str[write_index] = '\0';
 }
 
-/***********************************************
-*
-* @Finalidad: Convertir una cadena a mayúsculas.
-* @Parametros: char *str - Cadena de caracteres.
-* @Retorno: char* - Cadena convertida a mayúsculas.
-*
-************************************************/
+
 char *to_upper_case(char *str) {
     for (size_t i = 0; i < strlen(str); i++) {
         if (islower(str[i])) {
@@ -123,15 +98,7 @@ char *to_upper_case(char *str) {
     return str;
 }
 
-/***********************************************
-*
-* @Finalidad: Reemplazar caracteres en una cadena.
-* @Parametros: char *old_str - Cadena original.
-*              char old - Carácter a reemplazar.
-*              char new - Nuevo carácter.
-* @Retorno: Ninguno.
-*
-************************************************/
+
 void replace(char *old_str, char old, char new) {
     char *new_str = (char *)malloc(strlen(old_str) * sizeof(char) + 1);
     int old_str_len = (int)strlen(old_str);
@@ -153,15 +120,7 @@ void replace(char *old_str, char old, char new) {
     free(new_str);
 }
 
-/***********************************************
-*
-* @Finalidad: Leer una línea desde un archivo.
-* @Parametros: int fd - Descriptor de archivo.
-*              int *read_bytes - Puntero para almacenar el número de bytes leídos.
-*              char **line - Puntero a la línea leída.
-* @Retorno: bool - Verdadero si se alcanza el final del archivo, falso en caso contrario.
-*
-************************************************/
+
 bool read_line(int fd, int *read_bytes, char **line) {
     char ch;
     int read_value;
@@ -201,14 +160,7 @@ bool read_line(int fd, int *read_bytes, char **line) {
     return is_eof;
 }
 
-/***********************************************
-*
-* @Finalidad: Extraer el `x`-ésimo token de una cadena `message` separada por `&`, comenzando desde `message[3]` y deteniéndose en `message[249]`.
-* @Parametros: char* message - La cadena de caracteres de la cual se desea extraer el token.
-*              int x - El índice del token que se desea extraer (0 para el primer token, 1 para el segundo, etc.).
-* @Retorno: char* - Un puntero al `x`-ésimo token en la cadena `message`. Si no se encuentra el token, retorna la copia de la cadena.
-*
-************************************************/
+
 char* getXFromMessage(const char* message, int x) {
     // Ajustar el puntero para que apunte a message[3]
     const char *start = message + 3;
@@ -303,4 +255,14 @@ void sendMessageToSocket(int socket, char *type, char *data) {
 
     // Free the message after sending it
     free(messageToSend);
+}
+
+int isSocketOpen(int sockfd) {
+    // Comprueba si el descriptor es válido
+    if (fcntl(sockfd, F_GETFL) == -1) {
+        if (errno == EBADF) {
+            return 0; // Descriptor no válido (socket cerrado)
+        }
+    }
+    return 1; // Descriptor válido (socket abierto)
 }

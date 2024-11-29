@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall
+CFLAGS = -Wall -Wextra
 LDFLAGS = -lpthread
 DEPS = fleck/fleck.h utils/utils.h linkedlist/linkedlist.h
 
@@ -17,24 +17,24 @@ BIN_HARLEY = $(BIN_DIR)/harley
 all: $(BIN_DIR) $(BIN_FLECK) $(BIN_ENIGMA) $(BIN_GOTHAM) $(BIN_HARLEY)
 
 $(BIN_DIR):
-	mkdir -p $(BIN_DIR)
+    mkdir -p $(BIN_DIR)
 
 %.o: %.c $(DEPS)
-	$(CC) -c -o $@ $< $(CFLAGS)
+    $(CC) -c -o $@ $< $(CFLAGS)
 
 $(BIN_FLECK): $(OBJ_FLECK)
-	$(CC) -o $@ $^ $(CFLAGS)
+    $(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
 
 $(BIN_ENIGMA): $(OBJ_ENIGMA)
-	$(CC) -o $@ $^ $(CFLAGS)
+    $(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
 
 $(BIN_GOTHAM): $(OBJ_GOTHAM)
-	$(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
+    $(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
 
 $(BIN_HARLEY): $(OBJ_HARLEY)
-	$(CC) -o $@ $^ $(CFLAGS)
+    $(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
 
 .PHONY: clean
 
 clean:
-	rm -f $(BIN_FLECK) $(BIN_ENIGMA) $(BIN_GOTHAM) $(BIN_HARLEY) $(OBJ_FLECK) $(OBJ_ENIGMA) $(OBJ_GOTHAM) $(OBJ_HARLEY) linkedlist/linkedlist.o
+    rm -f $(BIN_FLECK) $(BIN_ENIGMA) $(BIN_GOTHAM) $(BIN_HARLEY) $(OBJ_FLECK) $(OBJ_ENIGMA) $(OBJ_GOTHAM) $(OBJ_HARLEY) linkedlist/linkedlist.o

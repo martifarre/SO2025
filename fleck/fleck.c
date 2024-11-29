@@ -110,14 +110,7 @@ void read_config_file(const char *config_file) {
 const char *media_extensions[] = {".wav", ".png", ".jpg", ".jpeg", ".mp3", ".mp4", NULL};
 const char *text_extensions[] = {".txt", ".dat", NULL};
 
-/***********************************************
-*
-* @Finalidad: Verificar si un archivo tiene una de las extensiones especificadas.
-* @Parametros: const char *filename - Nombre del archivo.
-*              const char **extensions - Lista de extensiones.
-* @Retorno: int - 1 si el archivo tiene una de las extensiones, 0 en caso contrario.
-*
-************************************************/
+
 int has_extension(const char *filename, const char **extensions) {
     const char *dot = strrchr(filename, '.');
     if (!dot || dot == filename) return 0;
@@ -130,15 +123,7 @@ int has_extension(const char *filename, const char **extensions) {
     return 0;
 }
 
-/***********************************************
-*
-* @Finalidad: Listar archivos en un directorio basados en extensiones.
-* @Parametros: const char *directory - Ruta del directorio.
-*              const char **extensions - Lista de extensiones.
-*              const char *label - Etiqueta para los archivos listados.
-* @Retorno: Ninguno.
-*
-************************************************/
+
 void list_files(const char *directory, const char **extensions, const char *label) {
     DIR *dir;
     struct dirent *entry;
@@ -177,13 +162,7 @@ void list_files(const char *directory, const char **extensions, const char *labe
     free(file_list);
 }
 
-/***********************************************
-*
-* @Finalidad: Leer un comando desde la entrada estándar.
-* @Parametros: int *words - Puntero para almacenar el número de palabras en el comando.
-* @Retorno: char* - El comando leído.
-*
-************************************************/
+
 char *read_command(int *words) {
     int read_bytes;
     print_text("\n$ ");
@@ -230,8 +209,8 @@ int createSocket(char *incoming_Port, char* incoming_IP) {
     s_addr.sin_addr = ip_addr;
 
     if (connect (sockfd, (void *) &s_addr, sizeof (s_addr)) < 0) {
-        write(STDOUT_FILENO, "Error: Cannot connect\n", 23);
-        exit (EXIT_FAILURE);
+        write(STDOUT_FILENO, "Error: Cannot connect.\n", 45);
+        sockfd = -1;
     }
 
     return sockfd;
@@ -266,17 +245,18 @@ char* file_exists_with_type(const char *directory, const char *file_name) {
     return result;
 }
 
-void connectToGotham () {
+int connectToGotham () {
     char *message = (char *)malloc(256 * sizeof(char));
     sockfd_G = createSocket(config.server_port, config.server_ip);
     if (sockfd_G < 0) {
         write(STDOUT_FILENO, "Error: Cannot connect to Gotham\n", 33);
-        exit(1);
+        return 0;
     } else {
         write(STDOUT_FILENO, "Connected to Gotham\n", 21);
         sendMessageToSocket(sockfd_G, "1", config.username);
         memset(message, '\0', 256);
         read(sockfd_G, message, 256);
+        return 1;
     }
 }
 
@@ -304,16 +284,16 @@ void distortFile (char* type, char* filename) {
     sendMessageToSocket(sockfd_G, "9", data);
     read(sockfd_G, message, 256);
     if(message[3] == 'K') {
-        write(STDOUT_FILENO, "ERROR.\n", 7);
+        write(STDOUT_FILENO, "ERROR: No worker for this type available.\n", 7);
     } else {
         sockfd_W = createSocket(getXFromMessage(message, 1), getXFromMessage(message, 0));
         sprintf(data, "%s&%s", config.username, filename);
         sendMessageToSocket(sockfd_W, "3", data);
         read(sockfd_W, message, 256);
         if(message[3] == 'K') {
-            write(STDOUT_FILENO, "ERROR.\n", 7);
+            write(STDOUT_FILENO, "ERROR: File could not be distorted\n", 7);
         } else {
-            write(STDOUT_FILENO, "File distorted.\n", 16);
+            write(STDOUT_FILENO, "File distorted correctly.\n", 16);
         }
         close(sockfd_W);
     }
@@ -353,13 +333,6 @@ void to_lowercase(char* str) {
 }
 
 
-/***********************************************
-*
-* @Finalidad: Función principal del terminal que procesa los comandos del usuario.
-* @Parametros: Ninguno.
-* @Retorno: Ninguno.
-*
-************************************************/
 void terminal() {
     int words;
     int connected = 0;
@@ -371,8 +344,9 @@ void terminal() {
             if(connected) {
                 write(STDOUT_FILENO, "Already connected\n", 19);
             } else {
-                connectToGotham();
-                connected = 1;  
+                if(connectToGotham()) {
+                    connected = 1;
+                }
             }
         } else if (strcmp(global_cmd, "LIST MEDIA") == 0) {
             write(STDOUT_FILENO, "Command OK\n", 12);
@@ -409,15 +383,21 @@ void terminal() {
     }
 }
 
-/***********************************************
-*
-* @Finalidad: Manejador de la señal CTRL+C para liberar recursos y salir del programa.
-* @Parametros: int signum - Número de la señal.
-* @Retorno: Ninguno.
-*
-************************************************/
+void doLogout () {
+    if (isSocketOpen(sockfd_G)) {
+        sendMessageToSocket(sockfd_G, "7", username);
+        close(sockfd_G);
+    }
+    if (isSocketOpen(sockfd_W)) {
+        sendMessageToSocket(sockfd_W, "7", username);
+        close(sockfd_W);
+    }
+}
+
+
 void CTRLC(int signum) {
     print_text("\nInterrupt signal CTRL+C received\n");
+    doLogout();
     if (global_cmd != NULL) {
         free(global_cmd);
         global_cmd = NULL;
@@ -426,14 +406,7 @@ void CTRLC(int signum) {
     exit(1);
 }
 
-/***********************************************
-*
-* @Finalidad: Función principal del programa. Lee el archivo de configuración y ejecuta el terminal.
-* @Parametros: int argc - Número de argumentos.
-*              char *argv[] - Array de argumentos.
-* @Retorno: int - Código de salida del programa.
-*
-************************************************/
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         write(STDOUT_FILENO, "Usage: Fleck <config_file>\n", 27);
