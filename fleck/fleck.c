@@ -27,7 +27,6 @@ FleckConfig config;
 char *global_cmd = NULL;
 int sockfd_G, sockfd_W;
 
-
 // Variable global para almacenar el estado de las distorsiones
 int ongoing_media_distortion = 0;
 int ongoing_text_distortion = 0;
@@ -253,17 +252,52 @@ int connectToGotham () {
         return 0;
     } else {
         write(STDOUT_FILENO, "Connected to Gotham\n", 21);
-        sendMessageToSocket(sockfd_G, "1", config.username);
+        sendMessageToSocket(sockfd_G, 0x01, (int16_t)strlen(config.username), config.username);
         memset(message, '\0', 256);
-        read(sockfd_G, message, 256);
+        struct trama ftrama;
+        if(readMessageFromSocket(sockfd_G, &ftrama) < 0) {
+            write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+            return 0;
+        }
         return 1;
     }
+}
+
+void loopRecieveFileDistorted (int sockfd, char* filename) {
+    struct trama ftrama;
+    if(readMessageFromSocket(sockfd, &ftrama) < 0) {
+        write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+        return;
+    }
+    int amount = atoi(getXFromMessage(ftrama.data, 0)); 
+    sendMessageToSocket(sockfd, 0x03, 0, "");
+    for(int i = 0; i < amountOfMessages; i++) {
+        if(readMessageFromSocket(sockfd, &ftrama) < 0) {
+            write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+            return;
+        } else if(ftrama.tipo == 0x07) {
+            write(STDOUT_FILENO, "Fleck recieved a CTRL+C.\n", 26);
+            return;
+        } else if(strcmp(ftrama.data, "Done") == 0) {
+            write(STDOUT_FILENO, "Something is wrong.\n", 21);
+            break;
+        } else {
+           sendMessageToSocket(sockfd, 0x03, 0, "");
+        }
+    }
+    if(readMessageFromSocket(sockfd, &ftrama) < 0) {
+        write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+        return;
+    } else if(strcmp(ftrama.data, "Done") == 0) {
+        write(STDOUT_FILENO, "File distorted received correctly.\n", 36);
+    } 
 }
 
 void distortFile (char* type, char* filename) {
     if (strcmp(type, "Media") == 0) {
         if (ongoing_media_distortion) {
             write(STDOUT_FILENO, "A media distortion is already in progress.\n", 44);
+            sendMessageToSocket(sockfd_G, 0x10, (int16_t)strlen("CON_KO"), "CON_KO");
             return;
         } else {
             ongoing_media_distortion = 1; 
@@ -271,6 +305,7 @@ void distortFile (char* type, char* filename) {
     } else if (strcmp(type, "Text") == 0) {
         if (ongoing_text_distortion) {
             write(STDOUT_FILENO, "A text distortion is already in progress.\n", 43);
+            sendMessageToSocket(sockfd_G, 0x10, (int16_t)strlen("CON_KO"), "CON_KO");
             return;
         } else {
             ongoing_text_distortion = 1; 
@@ -281,22 +316,30 @@ void distortFile (char* type, char* filename) {
     char* data = (char*)malloc(256 * sizeof(char));
 
     sprintf(data, "%s&%s", type, filename);
-    sendMessageToSocket(sockfd_G, "9", data);
-    read(sockfd_G, message, 256);
-    if(message[3] == 'K') {
-        write(STDOUT_FILENO, "ERROR: No worker for this type available.\n", 7);
-    } else {
-        sockfd_W = createSocket(getXFromMessage(message, 1), getXFromMessage(message, 0));
-        sprintf(data, "%s&%s", config.username, filename);
-        sendMessageToSocket(sockfd_W, "3", data);
-        read(sockfd_W, message, 256);
-        if(message[3] == 'K') {
-            write(STDOUT_FILENO, "ERROR: File could not be distorted\n", 7);
-        } else {
-            write(STDOUT_FILENO, "File distorted correctly.\n", 16);
-        }
-        close(sockfd_W);
+    sendMessageToSocket(sockfd_G, 0x10, (int16_t)strlen(data), data);
+    struct trama ftrama;
+    if(readMessageFromSocket(sockfd_G, &ftrama) < 0) {
+        write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+        return;
     }
+    if(strcmp(ftrama.data, "DISTORT_KO") == 0) {
+        write(STDOUT_FILENO, "ERROR: No worker for this type available.\n", 43);
+    } else {
+        sockfd_W = createSocket(getXFromMessage(ftrama.data, 1), getXFromMessage(ftrama.data, 0));
+        sprintf(data, "%s&%s", config.username, filename);
+        sendMessageToSocket(sockfd_W, 0x03, (int16_t)strlen(data), data);
+        if(readMessageFromSocket(sockfd_W, &ftrama) < 0) {
+            write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+            return;
+        }
+        if(strlen(ftrama.data, "CON_KO") == 0) {
+            write(STDOUT_FILENO, "ERROR: File could not be distorted\n", 36);
+        } else {
+            write(STDOUT_FILENO, "File starting to distort.\n", 27);
+            loopRecieveFileDistorted(sockfd_W, filename);
+        }
+    }
+    close(sockfd_W);
 
     // Reset 
     if (strcmp(type, "Media") == 0) {
@@ -385,11 +428,11 @@ void terminal() {
 
 void doLogout () {
     if (isSocketOpen(sockfd_G)) {
-        sendMessageToSocket(sockfd_G, "7", username);
+        sendMessageToSocket(sockfd_G, 0x07, (int16_t)strlen(username), username);
         close(sockfd_G);
     }
     if (isSocketOpen(sockfd_W)) {
-        sendMessageToSocket(sockfd_W, "7", username);
+        sendMessageToSocket(sockfd_W, 0x07, (int16_t)strlen("CON_KO"), "CON_KO"); 
         close(sockfd_W);
     }
 }

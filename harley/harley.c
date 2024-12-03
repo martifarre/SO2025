@@ -205,6 +205,31 @@ int createSocket(){
     return sockfd;
 }
 
+void loopSendFileDistorted (int sockfd, char* filename) {
+    char* data = (char*)malloc(sizeof(char) * 256);
+    int amount = 10;
+    sprintf(data, "%d&MD5SUM", amount);
+    sendMessageToSocket(sockfd, 0x04, (int16_t)strlen(data), data);
+    struct trama htrama;
+    if(readMessageFromSocket(sockfd, &htrama) < 0) {
+        write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+        return;
+    }
+    for(int i; i < amount; i++) {
+        sendMessageToSocket(sockfd, 0x05, (int16_t)strlen("FileChunk"), "FileChunk");
+        if(readMessageFromSocket(sockfd, &htrama) < 0) {
+            write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+            return;
+        } elseif (htrama.tipo == 0x07) {
+            write(STDOUT_FILENO, "Worker recieved a CTRL+C.\n", 27);
+            return;
+        }
+    }
+    sendMessageToSocket(sockfd, 0x05, (int16_t)strlen("Done"), "Done");
+    write(STDOUT_FILENO, "File distorted sent correctly.\n", 32);
+    free(data);
+}
+
 void initServer() {
     int socket_fd = initSocket(config.harley_server_port, config.harley_server_ip);
     int newsock;
@@ -221,23 +246,30 @@ void initServer() {
             exit (EXIT_FAILURE);
         }
 
-        read(newsock, message, 256);
-        sprintf(data, "Fleck username: %s, File to distort: %s", getXFromMessage(message, 0), getXFromMessage(message, 1));
+        struct trama htrama;
+        if(readMessageFromSocket(newsock, &htrama) > 0) {
+            write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+        }
+        sprintf(data, "Fleck username: %s, File to distort: %s", getXFromMessage(htrama.data, 0), getXFromMessage(htrama.data, 1));
         write(STDOUT_FILENO, data, strlen(data));
 
-        sendMessageToSocket(newsock, "3", "OK");
+        sendMessageToSocket(newsock, 0x03, 0, ""); //Indicar que se puede empezar a enviar el archvio.
+        //sendMessageToSocket(newsock, 0x03, (int16_t)strlen("CON_KO"), "CON_KO"); //Error, no se puede enviar archivo.
+        
+        loopSendFileDistorted(newsock, getXFromMessage(htrama.data, 1));
+    
         close(newsock);
     }
 }
 
 void doLogout() {
     if(isSocketOpen(newsock)) {
-        sendMessageToSocket(newsock, "3", "KO"); 
+        sendMessageToSocket(newsock, 0x07, (int16_t)strlen("CON_KO"), "CON_KO"); 
         close(newsock);
     }
 
     int sockfd = createSocket();
-    sendMessageToSocket(newsock, "7", worker_type);
+    sendMessageToSocket(sockfd, 0x07, (int16_t)strlen(config.worker_type),config.worker_type);
     close(sockfd);
 }
 
@@ -269,10 +301,14 @@ int main(int argc, char *argv[]) {
     int sockfd = createSocket();
     
     sprintf(data, "%s&%s&%s", config.worker_type, config.harley_server_ip, config.harley_server_port);
-    sendMessageToSocket(sockfd, "2", data);
-        
-    memset(data, '\0', 256);
-    read(sockfd, data, 256);
+    sendMessageToSocket(sockfd, 0x02, (int16_t)strlen(data), data);    
+
+    struct trama htrama;
+    if(readMessageFromSocket(sockfd, &htrama) < 0) {
+        write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+    } elseif(strcmp(htrama.data, "CON_KO") == 0) {
+        write(STDOUT_FILENO, "Error: Connection not validated.\n", 34);
+    }
 
     close(sockfd);
 

@@ -24,7 +24,7 @@ typedef struct {
 // Variable global para almacenar la configuración
 GothamConfig config;
 
-LinkedList workers;
+LinkedList workers; 
 
 void free_config() {
     free(config.fleck_server_ip);
@@ -131,7 +131,7 @@ void searchWorkerAndSendInfo(int fleckSock, char* type) {
     
     if (LINKEDLIST_isEmpty(workers)) {
         write(STDOUT_FILENO, "No workers available\n", 21);
-        sendMessageToSocket(fleckSock, "9", "KO");
+        sendMessageToSocket(fleckSock, 0x10, (int16_t)strlen("DISTORT_KO"), "DISTORT_KO");
         return;
     }
 
@@ -149,11 +149,11 @@ void searchWorkerAndSendInfo(int fleckSock, char* type) {
     if(worker == NULL) {
         sprintf(message, "No workers of type %s available\n", type);
         write(STDOUT_FILENO, message, strlen(message));
-        sendMessageToSocket(fleckSock, "9", "KO");
+        sendMessageToSocket(fleckSock, 0x10, (int16_t)strlen("DISTORT_KO"), "DISTORT_KO");
     } else {
         write(STDOUT_FILENO, "Worker found\n", 13);
         sprintf(data, "%s&%s", worker->ip, worker->port);  
-        sendMessageToSocket(fleckSock, "9", data);
+        sendMessageToSocket(fleckSock, 0x10, (int16_t)strlen(data), data);
     }
 }
 
@@ -161,24 +161,33 @@ void searchWorkerAndSendInfo(int fleckSock, char* type) {
 void* threadFleck(void* arg) {
     int fleckSock = *(int*)arg;
     char* message = (char*)malloc(sizeof(char) * 256);
-    memset(message, '\0', 256);
-    read(fleckSock, message, 256);
-    write(STDOUT_FILENO, message, strlen(message));
+    struct trama gtrama;
+    if(readMessageFromSocket(fleckSock, &gtrama) < 0) {
+        write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+        return NULL;
+    }
 
-    if(message[0] == '1') {
-        char* username = getXFromMessage(message, 0);
+    if(gtrama.tipo == 0x01) {
+        char* username = getXFromMessage(gtrama.data, 0);
         char* data = (char*)malloc(sizeof(char) * 256);
         sprintf(data, "Welcome %s, you are connected to Gotham.", username);
         write(STDOUT_FILENO, data, strlen(data));
-        sendMessageToSocket(fleckSock, "1", "OK");
+        sendMessageToSocket(fleckSock, 0x01, 0, "");
 
         memset(message, '\0', 256);
         while(1) {
-            read(fleckSock, message, 256);
-            if(message[0] == '9') {
-                char* type = getXFromMessage(message, 0);
-                //char* filename = getXFromMessage(message, 1);
-                searchWorkerAndSendInfo(fleckSock, type);
+            if(readMessageFromSocket(fleckSock, &gtrama) < 0) {
+                write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+                return NULL;
+            }
+            if(gtrama.tipo == 0x10) {
+                if(strcmp(gtrama.data, "CON_KO") == 0) {
+                    write(STDOUT_FILENO, "Error: Distortion of this type already in progress.\n", 53);
+                } else {
+                    char* type = getXFromMessage(gtrama.data, 0);
+                    //char* filename = getXFromMessage(gtrama.data, 1);
+                    searchWorkerAndSendInfo(fleckSock, type);
+                }
             }
         }
     }
@@ -223,10 +232,13 @@ void* funcThreadWorkers() {
             exit (EXIT_FAILURE);
         }
 
-        memset(message, '\0', 256);
-        read(newsock, message, 256);
+        struct trama gtrama;
+        if(readMessageFromSocket(newsock, &gtrama) < 0) {
+           write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+           return NULL;
+        }
 
-        if(message[0] == '2') {
+        if(gtrama.tipo == 0x02) {
             char* worker_type = getXFromMessage(message, 0);
             char* ip = getXFromMessage(message, 1);
             char* port = getXFromMessage(message, 2);
@@ -239,16 +251,22 @@ void* funcThreadWorkers() {
             LINKEDLIST_add(workers, worker);
             sprintf(aux, "Worker of type %s added\n", worker_type);
             write(STDOUT_FILENO, aux, strlen(aux));
-            sendMessageToSocket(newsock, "2", "OK");
-        }
+            sendMessageToSocket(newsock, 0x02, 0, "");
+            //sendMessageToSocket(newsock, 0x02, (int16_t)strlen("CON_KO"), "CON_KO");
+        
+        } else if(gtrama.tipo == 0x07) {
+            LINKEDLIST_goToHead(workers);
 
-        /*
-        if (validate_checksum(message)) {
-            write(STDOUT_FILENO, "Checksum valid\n", 15);
-        } else {
-            write(STDOUT_FILENO, "Checksum invalid\n", 17);
+            while(!LINKEDLIST_isAtEnd(workers)) {
+                Worker* currentWorker = LINKEDLIST_get(workers);
+                if(strcmp(currentWorker->worker_type, gtrama.data) == 0) {
+                    LINKEDLIST_remove(workers);
+                    break;
+                }
+                LINKEDLIST_next(workers);
+            }
+            write(STDOUT_FILENO, "Worker disconnected\n", 21);
         }
-        */
 
 
         close(newsock);

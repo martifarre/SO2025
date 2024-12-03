@@ -15,7 +15,6 @@
 #define N_LINES 16
 #define M_CHARS 16
 
-
 char *readUntil(int fd, char cEnd) {
     int i = 0;
     ssize_t chars_read;
@@ -162,12 +161,9 @@ bool read_line(int fd, int *read_bytes, char **line) {
 
 
 char* getXFromMessage(const char* message, int x) {
-    // Ajustar el puntero para que apunte a message[3]
-    const char *start = message + 3;
-
     // Crear una copia de la cadena para que strtok no altere el original
     char temp[247];
-    strncpy(temp, start, 246); // Copia hasta 246 caracteres desde start
+    strncpy(temp, message, 246); // Copia hasta 246 caracteres
     temp[246] = '\0';          // Asegura terminación en nulo
 
     // Inicializar el primer token
@@ -180,81 +176,83 @@ char* getXFromMessage(const char* message, int x) {
             return NULL; // Si no hay suficientes tokens, retorna NULL
         }
     }
-
     // Retornar una copia del `x`-ésimo token
     return token ? strdup(token) : NULL;
 }
 
-/*
-uint16_t calculate_checksum(char *message, int length) {
+uint16_t CONEXIONES_cacular_checksum(const char *trama) {
     uint32_t sum = 0;
-    for (int i = 0; i < length; i++) {
-        sum += (uint8_t)message[i];
-    }
-    return sum % 65536;
-}
 
-int validate_checksum(char *message) {
-    uint16_t received_checksum = (message[250] << 8) | message[251];
-
-    uint16_t calculated_checksum = calculate_checksum(message, 250);
-
-    printf("Received checksum: %u\n", received_checksum);
-    printf("Calculated checksum: %u\n", calculated_checksum);
-
-    return received_checksum == calculated_checksum;
-}
-*/
-
-char *buildMessage(char *type, char *data) {
-    char *message = (char *)malloc(256 * sizeof(char));
-    memset(message, '\0', 256);
-
-    // Type (1 Byte)
-    message[0] = type[0];
-    message[1] = '0';
-    message[2] = '0';
-
-    /*
-    // Data Length (2 Bytes)
-    uint16_t data_len = (uint16_t)strlen(data);
-
-    message[1] = (data_len >> 8) & 0xFF;
-    message[2] = data_len & 0xFF;
-    */
-
-    // Data (up to 245 Bytes)
-    for (int i = 0; i < strlen(data) && i < 247; i++) {
-        message[3 + i] = data[i];
+    // Asumimos que la trama tiene 256 bytes
+    for (int i = 0; i < 250; i++) { // Solo calculamos sobre los primeros 250 bytes
+        sum += (unsigned char)trama[i];
     }
 
-    /*
-    // Checksum (2 Bytes)
-    uint16_t checksum = calculate_checksum(message, 250);
-    message[250] = (checksum >> 8) & 0xFF;
-    message[251] = checksum & 0xFF;
+    // Reducimos la suma a 16 bits
+    uint16_t checksum = (sum & 0xFFFF) + (sum >> 16);
 
-    // Timestamp (4 Bytes)
-    int32_t timestamp = (int32_t)time(NULL);
-    memcpy(&message[252], &timestamp, 4);
-    */
-    return message;
+    // Retornamos el complemento a uno del checksum
+    return ~checksum;
 }
 
-void sendMessageToSocket(int socket, char *type, char *data) {
-    char *messageToSend = buildMessage(type, data);
+int readMessageFromSocket(int fd, struct trama *trama) {
+    char buffer[256];
+    int bytes_leidos = 0;
+    int checksum = 0;
 
-    if (messageToSend == NULL) {
-        print_error("Failed to build message correctly.\n");
-        return;
+    bytes_leidos = read(fd, &buffer, sizeof(char) * 256);
+    if (bytes_leidos != 256) {
+        perror("Error leyendo la trama del socket. NO SON 256 BYTES");
+        return -1;
     }
-    
-    printf("\n\nSending message: %s\n\n", messageToSend);
-    // Send the message through the socket
-    write(socket, messageToSend, 256);
 
-    // Free the message after sending it
-    free(messageToSend);
+    trama->data = malloc(256 - 9);  // El tamaño de data es 256 - (1 + 2 + 2 + 4)
+    trama->tipo = buffer[0];
+    trama->longitud = ((unsigned char)buffer[1] << 8 | (unsigned char)buffer[2]);
+
+    for (int i = 0; i < trama->longitud; i++) {
+        trama->data[i] = buffer[i + 3];
+    }
+
+    trama->checksum = ((unsigned char)buffer[250] << 8 | (unsigned char)buffer[251]);
+    trama->timestamp = ((unsigned char)buffer[252] << 24 |
+                        (unsigned char)buffer[253] << 16 |
+                        (unsigned char)buffer[254] << 8 |
+                        (unsigned char)buffer[255]);
+
+    checksum = CONEXIONES_cacular_checksum(buffer);
+    if (checksum == trama->checksum) {
+        return 1;
+    } else {
+        return -1;
+    }
+}
+
+void sendMessageToSocket(int fd, char type, int16_t data_length, char *data) {
+    char trama[256];
+    int timestamp = 0;
+    int checksum = 0;
+
+    memset(trama, '\0', sizeof(trama));
+    trama[0] = type;
+    trama[1] = (data_length >> 8) & 0xFF;
+    trama[2] = data_length & 0xFF;
+
+    for (int i = 0; i < data_length; i++) {
+        trama[i + 3] = data[i];
+    }
+
+    timestamp = time(NULL);
+    trama[252] = (timestamp >> 24) & 0xFF;
+    trama[253] = (timestamp >> 16) & 0xFF;
+    trama[254] = (timestamp >> 8) & 0xFF;
+    trama[255] = timestamp & 0xFF;
+
+    checksum = CONEXIONES_cacular_checksum(trama);
+    trama[250] = (checksum >> 8) & 0xFF;
+    trama[251] = checksum & 0xFF;
+
+    write(fd, trama, 256);
 }
 
 int isSocketOpen(int sockfd) {
