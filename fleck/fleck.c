@@ -271,7 +271,7 @@ void loopRecieveFileDistorted (int sockfd, char* filename) {
     }
     int amount = atoi(getXFromMessage(ftrama.data, 0)); 
     sendMessageToSocket(sockfd, 0x03, 0, "");
-    for(int i = 0; i < amountOfMessages; i++) {
+    for(int i = 0; i < amount; i++) {
         if(readMessageFromSocket(sockfd, &ftrama) < 0) {
             write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
             return;
