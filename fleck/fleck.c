@@ -175,7 +175,7 @@ char *read_command(int *words) {
 
 int createSocket(char *incoming_Port, char* incoming_IP) {
     char* message = (char*)malloc(sizeof(char) * 256);
-    sprintf(message, "Connecting %s...\n", config.username);
+    sprintf(message, "\nConnecting %s...\n", config.username);
     write(STDOUT_FILENO, message, strlen(message));
     free(message);
 
@@ -208,7 +208,7 @@ int createSocket(char *incoming_Port, char* incoming_IP) {
     s_addr.sin_addr = ip_addr;
 
     if (connect (sockfd, (void *) &s_addr, sizeof (s_addr)) < 0) {
-        write(STDOUT_FILENO, "Error: Cannot connect.\n", 45);
+        write(STDOUT_FILENO, "Error: Cannot connect.\n", 24);
         sockfd = -1;
     }
 
@@ -269,7 +269,8 @@ void loopRecieveFileDistorted (int sockfd, char* filename) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
         return;
     }
-    int amount = atoi(getXFromMessage(ftrama.data, 0)); 
+    int amount = atoi(getXFromMessage((const char *)ftrama.data, 0)); 
+    printf("Amount: %d\n", amount);
     sendMessageToSocket(sockfd, 0x03, 0, "");
     for(int i = 0; i < amount; i++) {
         if(readMessageFromSocket(sockfd, &ftrama) < 0) {
@@ -278,7 +279,7 @@ void loopRecieveFileDistorted (int sockfd, char* filename) {
         } else if(ftrama.tipo == 0x07) {
             write(STDOUT_FILENO, "Fleck recieved a CTRL+C.\n", 26);
             return;
-        } else if(strcmp(ftrama.data, "Done") == 0) {
+        } else if(strcmp((const char *)ftrama.data, "Done") == 0) {
             write(STDOUT_FILENO, "Something is wrong.\n", 21);
             break;
         } else {
@@ -288,7 +289,7 @@ void loopRecieveFileDistorted (int sockfd, char* filename) {
     if(readMessageFromSocket(sockfd, &ftrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
         return;
-    } else if(strcmp(ftrama.data, "Done") == 0) {
+    } else if(strcmp((const char *)ftrama.data, "Done") == 0) {
         write(STDOUT_FILENO, "File distorted received correctly.\n", 36);
     } 
 }
@@ -312,7 +313,6 @@ void distortFile (char* type, char* filename) {
         }
     }
 
-    char *message = (char *)malloc(256 * sizeof(char));
     char* data = (char*)malloc(256 * sizeof(char));
 
     sprintf(data, "%s&%s", type, filename);
@@ -322,24 +322,24 @@ void distortFile (char* type, char* filename) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
         return;
     }
-    if(strcmp(ftrama.data, "DISTORT_KO") == 0) {
+    if(strcmp((const char *)ftrama.data, "DISTORT_KO") == 0) {
         write(STDOUT_FILENO, "ERROR: No worker for this type available.\n", 43);
     } else {
-        sockfd_W = createSocket(getXFromMessage(ftrama.data, 1), getXFromMessage(ftrama.data, 0));
+        sockfd_W = createSocket(getXFromMessage((const char *)ftrama.data, 1), getXFromMessage((const char *)ftrama.data, 0));
         sprintf(data, "%s&%s", config.username, filename);
         sendMessageToSocket(sockfd_W, 0x03, (int16_t)strlen(data), data);
         if(readMessageFromSocket(sockfd_W, &ftrama) < 0) {
             write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
             return;
         }
-        if(strlen(ftrama.data, "CON_KO") == 0) {
+        if(strcmp((const char *)ftrama.data, "CON_KO") == 0) {
             write(STDOUT_FILENO, "ERROR: File could not be distorted\n", 36);
         } else {
             write(STDOUT_FILENO, "File starting to distort.\n", 27);
             loopRecieveFileDistorted(sockfd_W, filename);
         }
+        close(sockfd_W);
     }
-    close(sockfd_W);
 
     // Reset 
     if (strcmp(type, "Media") == 0) {
@@ -375,6 +375,16 @@ void to_lowercase(char* str) {
     }
 }
 
+void doLogout () {
+    if (isSocketOpen(sockfd_G)) {
+        sendMessageToSocket(sockfd_G, 0x07, (int16_t)strlen(config.username), config.username);
+        close(sockfd_G);
+    }
+    if (isSocketOpen(sockfd_W)) {
+        sendMessageToSocket(sockfd_W, 0x07, (int16_t)strlen("CON_KO"), "CON_KO"); 
+        close(sockfd_W);
+    }
+}
 
 void terminal() {
     int words;
@@ -392,10 +402,8 @@ void terminal() {
                 }
             }
         } else if (strcmp(global_cmd, "LIST MEDIA") == 0) {
-            write(STDOUT_FILENO, "Command OK\n", 12);
             list_files(config.directory, media_extensions, "media files");
         } else if (strcmp(global_cmd, "LIST TEXT") == 0) {
-            write(STDOUT_FILENO, "Command OK\n", 12);
             list_files(config.directory, text_extensions, "text files");
         } else if (strncmp(global_cmd, "DISTORT", 7) == 0 && words == 3) {
             char* extracted = extract_substring(global_cmd);
@@ -404,18 +412,22 @@ void terminal() {
             if(strcmp(type, "Neither") == 0) {  
                 write(STDOUT_FILENO, "File not found\n", 15);
             } else {
-                write(STDOUT_FILENO, "File exists.\n", 12);
+                write(STDOUT_FILENO, "File exists.\n", 14);
                 distortFile(type, extracted);
             }
         } else if (strcmp(global_cmd, "CHECK STATUS") == 0) {
-            write(STDOUT_FILENO, "Command OK\n", 12);
+            write(STDOUT_FILENO, "Command OK. Command not ready yet\n", 35);
         } else if (strcmp(global_cmd, "CLEAR ALL") == 0) {
-            write(STDOUT_FILENO, "Command OK\n", 12);
+            write(STDOUT_FILENO, "Command OK. Command not ready yet\n", 35);
         } else if (strcmp(global_cmd, "LOGOUT") == 0) {
-            write(STDOUT_FILENO, "Command OK\n", 12);
+            write(STDOUT_FILENO, "Command OK. Bye bye.\n", 22);
             free(global_cmd);
             global_cmd = NULL;
-            close(sockfd_G);
+            if(connected) {
+                doLogout();
+            } else {
+                write(STDOUT_FILENO, "Bye. You were not connected.\n", 30);
+            }
             break;
         } else {
             write(STDOUT_FILENO, "Unknown command\n", 17);
@@ -423,17 +435,6 @@ void terminal() {
 
         free(global_cmd);
         global_cmd = NULL;
-    }
-}
-
-void doLogout () {
-    if (isSocketOpen(sockfd_G)) {
-        sendMessageToSocket(sockfd_G, 0x07, (int16_t)strlen(username), username);
-        close(sockfd_G);
-    }
-    if (isSocketOpen(sockfd_W)) {
-        sendMessageToSocket(sockfd_W, 0x07, (int16_t)strlen("CON_KO"), "CON_KO"); 
-        close(sockfd_W);
     }
 }
 
@@ -462,7 +463,7 @@ int main(int argc, char *argv[]) {
 
     char* msg;
 
-    asprintf(&msg, "%s user initialized\n", config.username);
+    asprintf(&msg, "\n%s user initialized\n", config.username);
     print_text(msg);
     free(msg);
 

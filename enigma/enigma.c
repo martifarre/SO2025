@@ -25,6 +25,7 @@ typedef struct {
 // Variable global para almacenar la configuración
 EnigmaConfig config;
 
+int fleckSock;
 /***********************************************
 *
 * @Finalidad: Liberar la memoria asignada dinámicamente para la configuración.
@@ -197,7 +198,7 @@ int createSocket(){
     s_addr.sin_addr = ip_addr;
 
     if (connect (sockfd, (void *) &s_addr, sizeof (s_addr)) < 0) {
-        write(STDOUT_FILENO, "Error: Cannot connect\n", 33);
+        write(STDOUT_FILENO, "Error: Cannot connect\n", 23);
         exit (EXIT_FAILURE);
     }
 
@@ -220,7 +221,7 @@ void loopSendFileDistorted (int sockfd, char* filename) {
         if(readMessageFromSocket(sockfd, &etrama) < 0) {
             write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
             return;
-        } elseif (etrama.tipo == 0x07) {
+        } else if (etrama.tipo == 0x07) {
             write(STDOUT_FILENO, "Worker recieved a CTRL+C.\n", 27);
             return;
         }
@@ -232,39 +233,37 @@ void loopSendFileDistorted (int sockfd, char* filename) {
 
 void initServer() {
     int socket_fd = initSocket(config.enigma_server_port, config.enigma_server_ip);
-    int newsock;
     struct sockaddr_in c_addr;
     socklen_t c_len = sizeof (c_addr);
 
     
     while(1) {
         char *data = (char *)malloc(sizeof(char) * 256);
-        char *message = (char *)malloc(sizeof(char) * 256);
-        newsock = accept(socket_fd, (void *) &c_addr, &c_len);
-        if (newsock < 0) {
+        fleckSock = accept(socket_fd, (void *) &c_addr, &c_len);
+        if (fleckSock < 0) {
             write(STDOUT_FILENO, "Error: Cannot accept connection\n", 33);
             exit (EXIT_FAILURE);
         }
         struct trama etrama;
-        if(readMessageFromSocket(newsock, &etrama) > 0) {
+        if(readMessageFromSocket(fleckSock, &etrama) > 0) {
             write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
         }
-        sprintf(data, "Fleck username: %s, File to distort: %s", getXFromMessage(etrama.data, 0), getXFromMessage(etrama.data, 1));
+        sprintf(data, "Fleck username: %s, File to distort: %s", getXFromMessage((const char *)etrama.data, 0), getXFromMessage((const char *)etrama.data, 1));
         write(STDOUT_FILENO, data, strlen(data));
 
-        sendMessageToSocket(newsock, 0x03, 0, ""); //Indicar que se puede empezar a enviar el archvio.
-        //sendMessageToSocket(newsock, 0x03, (int16_t)strlen("CON_KO"), "CON_KO"); //Error, no se puede enviar archivo.
+        sendMessageToSocket(fleckSock, 0x03, 0, ""); //Indicar que se puede empezar a enviar el archvio.
+        //sendMessageToSocket(fleckSock, 0x03, (int16_t)strlen("CON_KO"), "CON_KO"); //Error, no se puede enviar archivo.
         
-        loopSendFileDistorted(newsock, getXFromMessage(etrama.data, 1));
+        loopSendFileDistorted(fleckSock, getXFromMessage((const char *)etrama.data, 1));
     
-        close(newsock);
+        close(fleckSock);
     }
 }
 
 void doLogout() {
-    if(isSocketOpen(newsock)) {
-        sendMessageToSocket(newsock, 0x07, (int16_t)strlen("CON_KO"), "CON_KO"); 
-        close(newsock);
+    if(isSocketOpen(fleckSock)) {
+        sendMessageToSocket(fleckSock, 0x07, (int16_t)strlen("CON_KO"), "CON_KO"); 
+        close(fleckSock);
     }
 
     int sockfd = createSocket();
@@ -305,7 +304,7 @@ int main(int argc, char *argv[]) {
     struct trama etrama;
     if(readMessageFromSocket(sockfd, &etrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
-    } elseif(strcmp(etrama.data, "CON_KO") == 0) {
+    } else if(strcmp((const char *)etrama.data, "CON_KO") == 0) {
         write(STDOUT_FILENO, "Error: Connection not validated.\n", 34);
     }
 

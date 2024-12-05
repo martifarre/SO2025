@@ -25,6 +25,7 @@ typedef struct {
 // Variable global para almacenar la configuración
 HarleyConfig config;
 
+int fleckSock = -1;
 /***********************************************
 *
 * @Finalidad: Liberar la memoria asignada dinámicamente para la configuración.
@@ -164,11 +165,6 @@ int initSocket(char* incoming_Port, char* incoming_IP) {
 }
 
 int createSocket(){
-    char* message = (char*)malloc(sizeof(char) * 256);
-    sprintf(message, "Connecting %s Server to the Gotham system...\n", config.directory);
-    write(STDOUT_FILENO, message, strlen(message)); 
-    free(message);
-
     uint16_t port;
     int aux = atoi(config.gotham_server_port);
     if (aux < 1 || aux > 65535) {
@@ -198,7 +194,7 @@ int createSocket(){
     s_addr.sin_addr = ip_addr;
 
     if (connect (sockfd, (void *) &s_addr, sizeof (s_addr)) < 0) {
-        write(STDOUT_FILENO, "Error: Cannot connect\n", 33);
+        write(STDOUT_FILENO, "Error: Cannot connect\n", 23);
         exit (EXIT_FAILURE);
     }
 
@@ -215,12 +211,12 @@ void loopSendFileDistorted (int sockfd, char* filename) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
         return;
     }
-    for(int i; i < amount; i++) {
+    for(int i = 0; i < amount; i++) {
         sendMessageToSocket(sockfd, 0x05, (int16_t)strlen("FileChunk"), "FileChunk");
         if(readMessageFromSocket(sockfd, &htrama) < 0) {
             write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
             return;
-        } elseif (htrama.tipo == 0x07) {
+        } else if (htrama.tipo == 0x07) {
             write(STDOUT_FILENO, "Worker recieved a CTRL+C.\n", 27);
             return;
         }
@@ -232,42 +228,43 @@ void loopSendFileDistorted (int sockfd, char* filename) {
 
 void initServer() {
     int socket_fd = initSocket(config.harley_server_port, config.harley_server_ip);
-    int newsock;
     struct sockaddr_in c_addr;
     socklen_t c_len = sizeof (c_addr);
 
     
     while(1) {
         char *data = (char *)malloc(sizeof(char) * 256);
-        char *message = (char *)malloc(sizeof(char) * 256);
-        newsock = accept(socket_fd, (void *) &c_addr, &c_len);
-        if (newsock < 0) {
+
+        fleckSock = accept(socket_fd, (void *) &c_addr, &c_len);
+        if (fleckSock < 0) {
             write(STDOUT_FILENO, "Error: Cannot accept connection\n", 33);
             exit (EXIT_FAILURE);
         }
 
         struct trama htrama;
-        if(readMessageFromSocket(newsock, &htrama) > 0) {
+        if(readMessageFromSocket(fleckSock, &htrama) < 0) {
             write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
         }
-        sprintf(data, "Fleck username: %s, File to distort: %s", getXFromMessage(htrama.data, 0), getXFromMessage(htrama.data, 1));
+        sprintf(data, "Fleck username: %s, File to distort: %s", getXFromMessage((const char *)htrama.data, 0), getXFromMessage((const char *)htrama.data, 1));
         write(STDOUT_FILENO, data, strlen(data));
 
-        sendMessageToSocket(newsock, 0x03, 0, ""); //Indicar que se puede empezar a enviar el archvio.
-        //sendMessageToSocket(newsock, 0x03, (int16_t)strlen("CON_KO"), "CON_KO"); //Error, no se puede enviar archivo.
+        sendMessageToSocket(fleckSock, 0x03, 0, ""); //Indicar que se puede empezar a enviar el archvio.
+        //sendMessageToSocket(fleckSock, 0x03, (int16_t)strlen("CON_KO"), "CON_KO"); //Error, no se puede enviar archivo.
         
-        loopSendFileDistorted(newsock, getXFromMessage(htrama.data, 1));
+        loopSendFileDistorted(fleckSock, getXFromMessage((const char *)htrama.data, 1));
     
-        close(newsock);
+        close(fleckSock);
+        fleckSock = -1;
     }
 }
 
 void doLogout() {
-    if(isSocketOpen(newsock)) {
-        sendMessageToSocket(newsock, 0x07, (int16_t)strlen("CON_KO"), "CON_KO"); 
-        close(newsock);
+    if(isSocketOpen(fleckSock)) {
+        sendMessageToSocket(fleckSock, 0x07, (int16_t)strlen("CON_KO"), "CON_KO"); 
+        close(fleckSock);
     }
 
+    write(STDOUT_FILENO, "Sending logout message to Gotham server...\n", 43);
     int sockfd = createSocket();
     sendMessageToSocket(sockfd, 0x07, (int16_t)strlen(config.worker_type),config.worker_type);
     close(sockfd);
@@ -294,10 +291,13 @@ int main(int argc, char *argv[]) {
     char *msg;
     char *data = (char *)malloc(sizeof(char) * 256);
 
-    asprintf(&msg, "Harley worker initialized\n");
+    asprintf(&msg, "\nHarley worker initialized\n\n");
     print_text(msg);
     free(msg);
 
+    sprintf(msg, "Connecting %s Server to the Gotham system...\n", config.directory);
+    print_text(msg);
+    free(msg);
     int sockfd = createSocket();
     
     sprintf(data, "%s&%s&%s", config.worker_type, config.harley_server_ip, config.harley_server_port);
@@ -306,7 +306,7 @@ int main(int argc, char *argv[]) {
     struct trama htrama;
     if(readMessageFromSocket(sockfd, &htrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
-    } elseif(strcmp(htrama.data, "CON_KO") == 0) {
+    } else if(strcmp((const char *)htrama.data, "CON_KO") == 0) {
         write(STDOUT_FILENO, "Error: Connection not validated.\n", 34);
     }
 

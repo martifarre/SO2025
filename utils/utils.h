@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <errno.h>
 #include "../linkedlist/linkedlist.h"
 
 #define print_text(str) write(1, str, strlen(str))

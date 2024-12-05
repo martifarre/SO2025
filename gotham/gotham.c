@@ -147,7 +147,7 @@ void searchWorkerAndSendInfo(int fleckSock, char* type) {
     }
 
     if(worker == NULL) {
-        sprintf(message, "No workers of type %s available\n", type);
+        sprintf(message, "\nNo workers of type %s available.\n\n", type);
         write(STDOUT_FILENO, message, strlen(message));
         sendMessageToSocket(fleckSock, 0x10, (int16_t)strlen("DISTORT_KO"), "DISTORT_KO");
     } else {
@@ -162,15 +162,16 @@ void* threadFleck(void* arg) {
     int fleckSock = *(int*)arg;
     char* message = (char*)malloc(sizeof(char) * 256);
     struct trama gtrama;
+    
     if(readMessageFromSocket(fleckSock, &gtrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
         return NULL;
     }
 
     if(gtrama.tipo == 0x01) {
-        char* username = getXFromMessage(gtrama.data, 0);
+        char* username = getXFromMessage((const char *)gtrama.data, 0);
         char* data = (char*)malloc(sizeof(char) * 256);
-        sprintf(data, "Welcome %s, you are connected to Gotham.", username);
+        sprintf(data, "Welcome %s, you are connected to Gotham.\n", username);
         write(STDOUT_FILENO, data, strlen(data));
         sendMessageToSocket(fleckSock, 0x01, 0, "");
 
@@ -181,13 +182,16 @@ void* threadFleck(void* arg) {
                 return NULL;
             }
             if(gtrama.tipo == 0x10) {
-                if(strcmp(gtrama.data, "CON_KO") == 0) {
+                if(strcmp((const char *)gtrama.data, "CON_KO") == 0) {
                     write(STDOUT_FILENO, "Error: Distortion of this type already in progress.\n", 53);
                 } else {
-                    char* type = getXFromMessage(gtrama.data, 0);
-                    //char* filename = getXFromMessage(gtrama.data, 1);
+                    char* type = getXFromMessage((const char *)gtrama.data, 0);
+                    //char* filename = getXFromMessage((const char *)gtrama.data, 1);
                     searchWorkerAndSendInfo(fleckSock, type);
                 }
+            } else if(gtrama.tipo == 0x07) {
+                write(STDOUT_FILENO, "Fleck was disconnected.\n", 25);
+                break;
             }
         }
     }
@@ -219,7 +223,6 @@ void* funcThreadFleckConnecter() {
 void* funcThreadWorkers() {
     int socket_fd = initSocket(config.external_server_port, config.external_server_ip);
     
-    char* message = (char*)malloc(sizeof(char) * 256);
     char* aux = (char*)malloc(sizeof(char) * 256);
     int newsock;
     struct sockaddr_in c_addr;
@@ -239,9 +242,9 @@ void* funcThreadWorkers() {
         }
 
         if(gtrama.tipo == 0x02) {
-            char* worker_type = getXFromMessage(message, 0);
-            char* ip = getXFromMessage(message, 1);
-            char* port = getXFromMessage(message, 2);
+            char* worker_type = getXFromMessage((const char *)gtrama.data, 0);
+            char* ip = getXFromMessage((const char *)gtrama.data, 1);
+            char* port = getXFromMessage((const char *)gtrama.data, 2);
 
             Worker* worker = (Worker*)malloc(sizeof(Worker));
             worker->ip = ip;
@@ -249,7 +252,7 @@ void* funcThreadWorkers() {
             worker->worker_type = worker_type;
 
             LINKEDLIST_add(workers, worker);
-            sprintf(aux, "Worker of type %s added\n", worker_type);
+            sprintf(aux, "Worker of type %s added\n\n", worker_type);
             write(STDOUT_FILENO, aux, strlen(aux));
             sendMessageToSocket(newsock, 0x02, 0, "");
             //sendMessageToSocket(newsock, 0x02, (int16_t)strlen("CON_KO"), "CON_KO");
@@ -259,7 +262,7 @@ void* funcThreadWorkers() {
 
             while(!LINKEDLIST_isAtEnd(workers)) {
                 Worker* currentWorker = LINKEDLIST_get(workers);
-                if(strcmp(currentWorker->worker_type, gtrama.data) == 0) {
+                if(strcmp(currentWorker->worker_type, (const char *)gtrama.data) == 0) {
                     LINKEDLIST_remove(workers);
                     break;
                 }
@@ -274,6 +277,7 @@ void* funcThreadWorkers() {
 }
 
 void doLogout() {
+    
 
 }
 
@@ -296,7 +300,7 @@ int main(int argc, char *argv[]) {
 
     char *msg;
 
-    asprintf(&msg, "Gotham server initialized.\n Waiting for connections...\n");
+    asprintf(&msg, "\nGotham server initialized.\nWaiting for connections...\n\n");
     print_text(msg);
     free(msg);
 

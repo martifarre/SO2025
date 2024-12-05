@@ -180,7 +180,7 @@ char* getXFromMessage(const char* message, int x) {
     return token ? strdup(token) : NULL;
 }
 
-uint16_t CONEXIONES_cacular_checksum(const char *trama) {
+uint16_t calculate_checksum(const char *trama) {
     uint32_t sum = 0;
 
     // Asumimos que la trama tiene 256 bytes
@@ -195,64 +195,64 @@ uint16_t CONEXIONES_cacular_checksum(const char *trama) {
     return ~checksum;
 }
 
-int readMessageFromSocket(int fd, struct trama *trama) {
+int readMessageFromSocket(int sockfd, struct trama *trama) {
+    
     char buffer[256];
-    int bytes_leidos = 0;
     int checksum = 0;
 
-    bytes_leidos = read(fd, &buffer, sizeof(char) * 256);
+    int bytes_leidos = read(sockfd, &buffer, 256);
     if (bytes_leidos != 256) {
-        perror("Error leyendo la trama del socket. NO SON 256 BYTES");
+        perror("Error reading from socket, size was not 256 bytes");
         return -1;
     }
 
-    trama->data = malloc(256 - 9);  // El tamaño de data es 256 - (1 + 2 + 2 + 4)
+    trama->data = malloc(247);
+    if (!trama->data) {
+        perror("Error al asignar memoria para trama->data");
+        return -1;
+    }
+
     trama->tipo = buffer[0];
     trama->longitud = ((unsigned char)buffer[1] << 8 | (unsigned char)buffer[2]);
 
     for (int i = 0; i < trama->longitud; i++) {
-        trama->data[i] = buffer[i + 3];
+        trama->data[i] = buffer[3 + i];
     }
-
     trama->checksum = ((unsigned char)buffer[250] << 8 | (unsigned char)buffer[251]);
-    trama->timestamp = ((unsigned char)buffer[252] << 24 |
-                        (unsigned char)buffer[253] << 16 |
-                        (unsigned char)buffer[254] << 8 |
-                        (unsigned char)buffer[255]);
+    trama->timestamp = ((unsigned char)buffer[252] << 24 | (unsigned char)buffer[253] << 16 |
+                        (unsigned char)buffer[254] << 8 | (unsigned char)buffer[255]);
 
-    checksum = CONEXIONES_cacular_checksum(buffer);
-    if (checksum == trama->checksum) {
-        return 1;
-    } else {
-        return -1;
-    }
+    checksum = calculate_checksum(buffer);
+    return (checksum == trama->checksum) ? 1 : -1;
 }
 
-void sendMessageToSocket(int fd, char type, int16_t data_length, char *data) {
+void sendMessageToSocket(int sockfd, char type, int16_t size, char *data) {
     char trama[256];
-    int timestamp = 0;
+    memset(trama, '\0', 256);
+
+    int timestamp = time(NULL);
     int checksum = 0;
 
-    memset(trama, '\0', sizeof(trama));
     trama[0] = type;
-    trama[1] = (data_length >> 8) & 0xFF;
-    trama[2] = data_length & 0xFF;
 
-    for (int i = 0; i < data_length; i++) {
-        trama[i + 3] = data[i];
+    trama[1] = (size >> 8) & 0xFF;
+    trama[2] = size & 0xFF;
+
+    for (int i = 0; i < size; i++) {
+        trama[3 + i] = data[i];
     }
 
-    timestamp = time(NULL);
     trama[252] = (timestamp >> 24) & 0xFF;
     trama[253] = (timestamp >> 16) & 0xFF;
     trama[254] = (timestamp >> 8) & 0xFF;
     trama[255] = timestamp & 0xFF;
 
-    checksum = CONEXIONES_cacular_checksum(trama);
+    checksum = calculate_checksum(trama);
+
     trama[250] = (checksum >> 8) & 0xFF;
     trama[251] = checksum & 0xFF;
 
-    write(fd, trama, 256);
+    write(sockfd, trama, 256);
 }
 
 int isSocketOpen(int sockfd) {
