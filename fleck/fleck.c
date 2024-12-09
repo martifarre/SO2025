@@ -86,6 +86,7 @@ void loopRecieveFileDistorted (int sockfd, char* filename) {
     }
     char* extracted = STRING_getXFromMessage((const char *)ftrama.data, 0);
     int amount = atoi(extracted); 
+    free(ftrama.data);
     free(extracted);
     printf("Amount: %d\n", amount);
     TRAMA_sendMessageToSocket(sockfd, 0x03, 0, "");
@@ -102,6 +103,7 @@ void loopRecieveFileDistorted (int sockfd, char* filename) {
         } else {
            TRAMA_sendMessageToSocket(sockfd, 0x03, 0, "");
         }
+        free(ftrama.data);
     }
     if(TRAMA_readMessageFromSocket(sockfd, &ftrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
@@ -109,6 +111,7 @@ void loopRecieveFileDistorted (int sockfd, char* filename) {
     } else if(strcmp((const char *)ftrama.data, "Done") == 0) {
         write(STDOUT_FILENO, "File distorted received correctly.\n", 36);
     } 
+    free(ftrama.data);
 }
 
 void distortFile (char* type, char* filename) {
@@ -144,9 +147,9 @@ void distortFile (char* type, char* filename) {
         write(STDOUT_FILENO, "ERROR: No worker for this type available.\n", 43);
         free(ftrama.data);
     } else {
-        char *extracted = STRING_getXFromMessage((const char *)ftrama.data, 1);
+        char *extracted1 = STRING_getXFromMessage((const char *)ftrama.data, 1);
         char *extracted2 = STRING_getXFromMessage((const char *)ftrama.data, 0);
-        sockfd_W = SOCKET_createSocket(extracted, extracted2);
+        sockfd_W = SOCKET_createSocket(extracted1, extracted2);
         free(ftrama.data);  
         memset(data, '\0', 256);
         sprintf(data, "%s&%s", config.username, filename);
@@ -162,7 +165,7 @@ void distortFile (char* type, char* filename) {
             loopRecieveFileDistorted(sockfd_W, filename);
         }
         free(ftrama.data);
-        free(extracted);
+        free(extracted1);
         free(extracted2);
         close(sockfd_W);
         sockfd_W = -1;
@@ -251,8 +254,14 @@ void terminal() {
                     write(STDOUT_FILENO, "File exists.\n", 14);
                     distortFile(type, extracted);
                 }
-                free(extracted);
-                free(type);
+                if (extracted != NULL) {
+                    free(extracted);
+                    extracted = NULL;
+                }
+                if (type != NULL) {
+                    free(type);
+                    type = NULL;
+                }
             }
         } else if (strcmp(global_cmd, "CHECK STATUS") == 0) {
             write(STDOUT_FILENO, "Command OK. Command not ready yet\n", 35);
