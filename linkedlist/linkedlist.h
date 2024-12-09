@@ -24,15 +24,16 @@
 #define LIST_ERROR_END 4			// Error, the POV is at the end.
 
 typedef struct{
+    int sockfd;
     char* ip;
     char* port;
     char* worker_type;
-} Worker;
+    char* fleck_username;
+} listElement;
 
 
 // Data types
-typedef Worker* Element;
-
+typedef listElement* Element;
 
 typedef struct list_t* LinkedList;
 

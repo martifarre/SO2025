@@ -10,12 +10,12 @@
 *
 ************************************************/
 #define _GNU_SOURCE
-#include "utils.h"
+#include "string.h"
 
 #define N_LINES 16
 #define M_CHARS 16
 
-char *readUntil(int fd, char cEnd) {
+char *STRING_readUntil(int fd, char cEnd) {
     int i = 0;
     ssize_t chars_read;
     char c = 0;
@@ -45,7 +45,7 @@ char *readUntil(int fd, char cEnd) {
 }
 
 
-int count_words(char *str) {
+int STRING_count_words(char *str) {
     int words = 0;
     int is_space = 0;
     for (char *p = str; *p; ++p) {
@@ -60,7 +60,7 @@ int count_words(char *str) {
 }
 
 
-void strip_whitespace(char *str) {
+void STRING_strip_whitespace(char *str) {
     int read_index = 0, write_index = 0;
     int in_word = 0;  // Indica si estamos dentro de una palabra
 
@@ -88,7 +88,7 @@ void strip_whitespace(char *str) {
 }
 
 
-char *to_upper_case(char *str) {
+char *STRING_to_upper_case(char *str) {
     for (size_t i = 0; i < strlen(str); i++) {
         if (islower(str[i])) {
             str[i] = toupper(str[i]);
@@ -98,7 +98,7 @@ char *to_upper_case(char *str) {
 }
 
 
-void replace(char *old_str, char old, char new) {
+void STRING_replace(char *old_str, char old, char new) {
     char *new_str = (char *)malloc(strlen(old_str) * sizeof(char) + 1);
     int old_str_len = (int)strlen(old_str);
     int j = 0;
@@ -120,7 +120,7 @@ void replace(char *old_str, char old, char new) {
 }
 
 
-bool read_line(int fd, int *read_bytes, char **line) {
+bool STRING_read_line(int fd, int *read_bytes, char **line) {
     char ch;
     int read_value;
     int new_size;
@@ -159,12 +159,16 @@ bool read_line(int fd, int *read_bytes, char **line) {
     return is_eof;
 }
 
+char* STRING_getXFromMessage(const char* message, int x) {
+    // Verificar si el mensaje es válido
+    if (!message || x < 0) {
+        return NULL;
+    }
 
-char* getXFromMessage(const char* message, int x) {
     // Crear una copia de la cadena para que strtok no altere el original
     char temp[247];
     strncpy(temp, message, 246); // Copia hasta 246 caracteres
-    temp[246] = '\0';          // Asegura terminación en nulo
+    temp[246] = '\0';            // Asegura terminación en nulo
 
     // Inicializar el primer token
     char *token = strtok(temp, "&");
@@ -176,91 +180,30 @@ char* getXFromMessage(const char* message, int x) {
             return NULL; // Si no hay suficientes tokens, retorna NULL
         }
     }
+
     // Retornar una copia del `x`-ésimo token
-    return token ? strdup(token) : NULL;
+    return token ? strdup(token) : NULL; // Duplicar el token antes de retornarlo
 }
 
-uint16_t calculate_checksum(const char *trama) {
-    uint32_t sum = 0;
+char* STRING_extract_substring(char* global_cmd) {
+    char* start = global_cmd + 8;
+    char* end = strchr(start, ' ');
 
-    // Asumimos que la trama tiene 256 bytes
-    for (int i = 0; i < 250; i++) { // Solo calculamos sobre los primeros 250 bytes
-        sum += (unsigned char)trama[i];
+    if (end == NULL) {
+        // Si no se encuentra un espacio, copiar hasta el final de la cadena
+        return strdup(start);
     }
 
-    // Reducimos la suma a 16 bits
-    uint16_t checksum = (sum & 0xFFFF) + (sum >> 16);
+    size_t length = end - start;
+    char* substring = (char*)malloc((length + 1) * sizeof(char));
+    strncpy(substring, start, length);
+    substring[length] = '\0';
 
-    // Retornamos el complemento a uno del checksum
-    return ~checksum;
+    return substring;
 }
 
-int readMessageFromSocket(int sockfd, struct trama *trama) {
-    
-    char buffer[256];
-    int checksum = 0;
-
-    int bytes_leidos = read(sockfd, &buffer, 256);
-    if (bytes_leidos != 256) {
-        perror("Error reading from socket, size was not 256 bytes");
-        return -1;
+void STRING_to_lowercase(char* str) {
+    for (int i = 0; str[i]; i++) {
+        str[i] = tolower(str[i]);
     }
-
-    trama->data = malloc(247);
-    if (!trama->data) {
-        perror("Error al asignar memoria para trama->data");
-        return -1;
-    }
-
-    trama->tipo = buffer[0];
-    trama->longitud = ((unsigned char)buffer[1] << 8 | (unsigned char)buffer[2]);
-
-    for (int i = 0; i < trama->longitud; i++) {
-        trama->data[i] = buffer[3 + i];
-    }
-    trama->checksum = ((unsigned char)buffer[250] << 8 | (unsigned char)buffer[251]);
-    trama->timestamp = ((unsigned char)buffer[252] << 24 | (unsigned char)buffer[253] << 16 |
-                        (unsigned char)buffer[254] << 8 | (unsigned char)buffer[255]);
-
-    checksum = calculate_checksum(buffer);
-    return (checksum == trama->checksum) ? 1 : -1;
-}
-
-void sendMessageToSocket(int sockfd, char type, int16_t size, char *data) {
-    char trama[256];
-    memset(trama, '\0', 256);
-
-    int timestamp = time(NULL);
-    int checksum = 0;
-
-    trama[0] = type;
-
-    trama[1] = (size >> 8) & 0xFF;
-    trama[2] = size & 0xFF;
-
-    for (int i = 0; i < size; i++) {
-        trama[3 + i] = data[i];
-    }
-
-    trama[252] = (timestamp >> 24) & 0xFF;
-    trama[253] = (timestamp >> 16) & 0xFF;
-    trama[254] = (timestamp >> 8) & 0xFF;
-    trama[255] = timestamp & 0xFF;
-
-    checksum = calculate_checksum(trama);
-
-    trama[250] = (checksum >> 8) & 0xFF;
-    trama[251] = checksum & 0xFF;
-
-    write(sockfd, trama, 256);
-}
-
-int isSocketOpen(int sockfd) {
-    // Comprueba si el descriptor es válido
-    if (fcntl(sockfd, F_GETFL) == -1) {
-        if (errno == EBADF) {
-            return 0; // Descriptor no válido (socket cerrado)
-        }
-    }
-    return 1; // Descriptor válido (socket abierto)
 }

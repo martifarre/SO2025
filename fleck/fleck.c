@@ -10,26 +10,19 @@
 *
 ************************************************/
 #define _GNU_SOURCE
-#include "../utils/utils.h"
-#include "fleck.h"
-
-// Definición de la estructura FleckConfig para almacenar la configuración
-typedef struct {
-    char *username;
-    char *directory;
-    char *server_ip;
-    char *server_port; // Cambiado a char*
-} FleckConfig;
+#include "../modules/project.h"
 
 // Variable global para almacenar la configuración
 FleckConfig config;
 // Variable global para almacenar el comando leído
 char *global_cmd = NULL;
-int sockfd_G, sockfd_W;
+int sockfd_G = -1, sockfd_W = -1;
 
 // Variable global para almacenar el estado de las distorsiones
 int ongoing_media_distortion = 0;
 int ongoing_text_distortion = 0;
+
+int connected = 0;
 
 /***********************************************
 *
@@ -45,235 +38,59 @@ void free_config() {
     free(config.server_port); // Liberar la memoria del puerto
 }
 
-/***********************************************
-*
-* @Finalidad: Leer el archivo de configuración y almacenar los valores en la estructura FleckConfig.
-* @Parametros: const char *config_file - Ruta del archivo de configuración.
-* @Retorno: Ninguno.
-*
-************************************************/
-void read_config_file(const char *config_file) {
-    int fd = open(config_file, O_RDONLY);
-    if (fd == -1) {
-        write(STDOUT_FILENO, "Error: Cannot open configuration file\n", 39);
-        exit(1);
-    }
-
-    config.username = readUntil(fd, '\n');
-    if (strchr(config.username, '$') != NULL) {
-        write(STDOUT_FILENO, "Error: Invalid character '$' in username\n", 41);
-        free_config();
-        close(fd);
-        exit(1);
-    }
-    replace(config.username, '\r', '\0');
-
-    if (config.username == NULL) {
-        write(STDOUT_FILENO, "Error: Failed to read username\n", 31);
-        free_config();
-        close(fd);
-        exit(1);
-    }
-
-    config.directory = readUntil(fd, '\n');
-    replace(config.directory, '\r', '\0');
-    if (config.directory == NULL) {
-        write(STDOUT_FILENO, "Error: Failed to read directory\n", 32);
-        free_config();
-        close(fd);
-        exit(1);
-    }
-
-    config.server_ip = readUntil(fd, '\n');
-    replace(config.server_ip, '\r', '\0');
-    if (config.server_ip == NULL) {
-        write(STDOUT_FILENO, "Error: Failed to read server IP\n", 33);
-        free_config();
-        close(fd);
-        exit(1);
-    }
-
-    config.server_port = readUntil(fd, '\n'); // Leer el puerto como char*
-    if (config.server_port == NULL) {
-        write(STDOUT_FILENO, "Error: Failed to read server port\n", 34);
-        free_config();
-        close(fd);
-        exit(1);
-    }
-    replace(config.server_port, '\r', '\0'); // Eliminar el carácter '\r' al final
-
-    close(fd);
-}
-
-// Extensiones de archivos de medios y texto
-const char *media_extensions[] = {".wav", ".png", ".jpg", ".jpeg", ".mp3", ".mp4", NULL};
-const char *text_extensions[] = {".txt", ".dat", NULL};
-
-
-int has_extension(const char *filename, const char **extensions) {
-    const char *dot = strrchr(filename, '.');
-    if (!dot || dot == filename) return 0;
-
-    for (int i = 0; extensions[i] != NULL; i++) {
-        if (strcasecmp(dot, extensions[i]) == 0) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-
-void list_files(const char *directory, const char **extensions, const char *label) {
-    DIR *dir;
-    struct dirent *entry;
-    int count = 0;
-    char **file_list = NULL;
-    char* buffer;
-
-    dir = opendir(directory);
-    if (dir == NULL) {
-        return;
-    }
-
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_DIR) {
-            continue;
-        }
-        if (has_extension(entry->d_name, extensions)) {
-            file_list = realloc(file_list, sizeof(char *) * (count + 1));
-            file_list[count] = strdup(entry->d_name);
-            count++;
-        }
-    }
-    closedir(dir);
-
-    asprintf(&buffer, "There are %d %s available:\n", count, label);
-    print_text(buffer);
-    free(buffer);
-
-    for (int i = 0; i < count; i++) {
-        asprintf(&buffer, "%d. %s\n", i + 1, file_list[i]);
-        print_text(buffer);
-        free(buffer);
-
-        free(file_list[i]); 
-    }
-    free(file_list);
-}
-
-
 char *read_command(int *words) {
     int read_bytes;
     print_text("\n$ ");
-    read_line(STDIN_FILENO, &read_bytes, &global_cmd);
-    global_cmd = to_upper_case(global_cmd);
-    replace(global_cmd, '\n', '\0');
-    *words = count_words(global_cmd);
-    strip_whitespace(global_cmd);
+    STRING_read_line(STDIN_FILENO, &read_bytes, &global_cmd);
+    global_cmd = STRING_to_upper_case(global_cmd);
+    STRING_replace(global_cmd, '\n', '\0');
+    *words = STRING_count_words(global_cmd);
+    STRING_strip_whitespace(global_cmd);
     return global_cmd;
 }
 
-int createSocket(char *incoming_Port, char* incoming_IP) {
-    char* message = (char*)malloc(sizeof(char) * 256);
+int connectToGotham() {
+    char *message = (char *)malloc(256 * sizeof(char));
     sprintf(message, "\nConnecting %s...\n", config.username);
     write(STDOUT_FILENO, message, strlen(message));
-    free(message);
 
-    uint16_t port;
-    int aux = atoi(incoming_Port);
-    if (aux < 1 || aux > 65535) {
-        write(STDOUT_FILENO, "Error: Invalid port\n", 21);
-        exit (EXIT_FAILURE);
-
-    }
-    port = aux;
-
-    struct in_addr ip_addr;
-    if (inet_pton(AF_INET, incoming_IP, &ip_addr) != 1) {
-        write(STDOUT_FILENO, "Error: Cannot convert IP address\n", 34);
-        exit (EXIT_FAILURE);
-    }
-
-    int sockfd;
-    sockfd = socket (AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (sockfd < 0) {
-        write(STDOUT_FILENO, "Error: Cannot create socket\n", 29);
-        exit (EXIT_FAILURE);
-    }
-
-    struct sockaddr_in s_addr;
-    memset (&s_addr, '\0', sizeof (s_addr));
-    s_addr.sin_family = AF_INET;
-    s_addr.sin_port = htons (port);
-    s_addr.sin_addr = ip_addr;
-
-    if (connect (sockfd, (void *) &s_addr, sizeof (s_addr)) < 0) {
-        write(STDOUT_FILENO, "Error: Cannot connect.\n", 24);
-        sockfd = -1;
-    }
-
-    return sockfd;
-}
-
-// Función para comprobar si el archivo existe y devolver su tipo
-char* file_exists_with_type(const char *directory, const char *file_name) {
-    DIR *dir;
-    struct dirent *entry;
-    char *result = "Neither";  // Por defecto
-
-    dir = opendir(directory);
-    if (dir == NULL) {
-        write(STDOUT_FILENO, "Error: Cannot open directory\n", 30);
-        return "Neither"; // Error al abrir el directorio o directorio no existe
-    }
-
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_DIR) {
-            continue;
-        }
-        if (strcmp(entry->d_name, file_name) == 0) {
-            if (has_extension(file_name, media_extensions)) {
-                result = "Media";
-            } else if (has_extension(file_name, text_extensions)) {
-                result = "Text";
-            }
-            break;
-        }
-    }
-    closedir(dir);
-    return result;
-}
-
-int connectToGotham () {
-    char *message = (char *)malloc(256 * sizeof(char));
-    sockfd_G = createSocket(config.server_port, config.server_ip);
+    sockfd_G = SOCKET_createSocket(config.server_port, config.server_ip);
     if (sockfd_G < 0) {
         write(STDOUT_FILENO, "Error: Cannot connect to Gotham\n", 33);
+        free(message);  // Liberar antes de retornar
         return 0;
-    } else {
-        write(STDOUT_FILENO, "Connected to Gotham\n", 21);
-        sendMessageToSocket(sockfd_G, 0x01, (int16_t)strlen(config.username), config.username);
-        memset(message, '\0', 256);
-        struct trama ftrama;
-        if(readMessageFromSocket(sockfd_G, &ftrama) < 0) {
-            write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
-            return 0;
-        }
-        return 1;
     }
+
+    write(STDOUT_FILENO, "Connected to Gotham\n", 21);
+    TRAMA_sendMessageToSocket(sockfd_G, 0x01, (int16_t)strlen(config.username), config.username);
+
+    struct trama ftrama;
+    if (TRAMA_readMessageFromSocket(sockfd_G, &ftrama) < 0) {
+        write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+        close(sockfd_G);
+        free(message);  // Liberar antes de retornar
+        return 0;
+    }
+
+    free(ftrama.data);
+    free(message);  // Liberar antes de retornar
+    return 1;
 }
+
 
 void loopRecieveFileDistorted (int sockfd, char* filename) {
     struct trama ftrama;
-    if(readMessageFromSocket(sockfd, &ftrama) < 0) {
+    if(TRAMA_readMessageFromSocket(sockfd, &ftrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
         return;
     }
-    int amount = atoi(getXFromMessage((const char *)ftrama.data, 0)); 
+    char* extracted = STRING_getXFromMessage((const char *)ftrama.data, 0);
+    int amount = atoi(extracted); 
+    free(extracted);
     printf("Amount: %d\n", amount);
-    sendMessageToSocket(sockfd, 0x03, 0, "");
+    TRAMA_sendMessageToSocket(sockfd, 0x03, 0, "");
     for(int i = 0; i < amount; i++) {
-        if(readMessageFromSocket(sockfd, &ftrama) < 0) {
+        if(TRAMA_readMessageFromSocket(sockfd, &ftrama) < 0) {
             write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
             return;
         } else if(ftrama.tipo == 0x07) {
@@ -283,10 +100,10 @@ void loopRecieveFileDistorted (int sockfd, char* filename) {
             write(STDOUT_FILENO, "Something is wrong.\n", 21);
             break;
         } else {
-           sendMessageToSocket(sockfd, 0x03, 0, "");
+           TRAMA_sendMessageToSocket(sockfd, 0x03, 0, "");
         }
     }
-    if(readMessageFromSocket(sockfd, &ftrama) < 0) {
+    if(TRAMA_readMessageFromSocket(sockfd, &ftrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
         return;
     } else if(strcmp((const char *)ftrama.data, "Done") == 0) {
@@ -298,7 +115,7 @@ void distortFile (char* type, char* filename) {
     if (strcmp(type, "Media") == 0) {
         if (ongoing_media_distortion) {
             write(STDOUT_FILENO, "A media distortion is already in progress.\n", 44);
-            sendMessageToSocket(sockfd_G, 0x10, (int16_t)strlen("CON_KO"), "CON_KO");
+            TRAMA_sendMessageToSocket(sockfd_G, 0x10, (int16_t)strlen("CON_KO"), "CON_KO");
             return;
         } else {
             ongoing_media_distortion = 1; 
@@ -306,7 +123,7 @@ void distortFile (char* type, char* filename) {
     } else if (strcmp(type, "Text") == 0) {
         if (ongoing_text_distortion) {
             write(STDOUT_FILENO, "A text distortion is already in progress.\n", 43);
-            sendMessageToSocket(sockfd_G, 0x10, (int16_t)strlen("CON_KO"), "CON_KO");
+            TRAMA_sendMessageToSocket(sockfd_G, 0x10, (int16_t)strlen("CON_KO"), "CON_KO");
             return;
         } else {
             ongoing_text_distortion = 1; 
@@ -316,19 +133,25 @@ void distortFile (char* type, char* filename) {
     char* data = (char*)malloc(256 * sizeof(char));
 
     sprintf(data, "%s&%s", type, filename);
-    sendMessageToSocket(sockfd_G, 0x10, (int16_t)strlen(data), data);
+    TRAMA_sendMessageToSocket(sockfd_G, 0x10, (int16_t)strlen(data), data);
+
     struct trama ftrama;
-    if(readMessageFromSocket(sockfd_G, &ftrama) < 0) {
+    if(TRAMA_readMessageFromSocket(sockfd_G, &ftrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
         return;
     }
     if(strcmp((const char *)ftrama.data, "DISTORT_KO") == 0) {
         write(STDOUT_FILENO, "ERROR: No worker for this type available.\n", 43);
+        free(ftrama.data);
     } else {
-        sockfd_W = createSocket(getXFromMessage((const char *)ftrama.data, 1), getXFromMessage((const char *)ftrama.data, 0));
+        char *extracted = STRING_getXFromMessage((const char *)ftrama.data, 1);
+        char *extracted2 = STRING_getXFromMessage((const char *)ftrama.data, 0);
+        sockfd_W = SOCKET_createSocket(extracted, extracted2);
+        free(ftrama.data);  
+        memset(data, '\0', 256);
         sprintf(data, "%s&%s", config.username, filename);
-        sendMessageToSocket(sockfd_W, 0x03, (int16_t)strlen(data), data);
-        if(readMessageFromSocket(sockfd_W, &ftrama) < 0) {
+        TRAMA_sendMessageToSocket(sockfd_W, 0x03, (int16_t)strlen(data), data);
+        if(TRAMA_readMessageFromSocket(sockfd_W, &ftrama) < 0) {
             write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
             return;
         }
@@ -338,7 +161,11 @@ void distortFile (char* type, char* filename) {
             write(STDOUT_FILENO, "File starting to distort.\n", 27);
             loopRecieveFileDistorted(sockfd_W, filename);
         }
+        free(ftrama.data);
+        free(extracted);
+        free(extracted2);
         close(sockfd_W);
+        sockfd_W = -1;
     }
 
     // Reset 
@@ -347,48 +174,48 @@ void distortFile (char* type, char* filename) {
     } else if (strcmp(type, "Text") == 0) {
         ongoing_text_distortion = 0;
     }
-
-    /*free(data);
-    free(message);*/
-}
-
-char* extract_substring(char* global_cmd) {
-    char* start = global_cmd + 8;
-    char* end = strchr(start, ' ');
-
-    if (end == NULL) {
-        // Si no se encuentra un espacio, copiar hasta el final de la cadena
-        return strdup(start);
-    }
-
-    size_t length = end - start;
-    char* substring = (char*)malloc((length + 1) * sizeof(char));
-    strncpy(substring, start, length);
-    substring[length] = '\0';
-
-    return substring;
-}
-
-void to_lowercase(char* str) {
-    for (int i = 0; str[i]; i++) {
-        str[i] = tolower(str[i]);
-    }
+    free(data);
 }
 
 void doLogout () {
-    if (isSocketOpen(sockfd_G)) {
-        sendMessageToSocket(sockfd_G, 0x07, (int16_t)strlen(config.username), config.username);
+    write(STDOUT_FILENO, "Logging out...\n", 15);
+    if (SOCKET_isSocketOpen(sockfd_G)) {
+        TRAMA_sendMessageToSocket(sockfd_G, 0x07, (int16_t)strlen(config.username), config.username);
         close(sockfd_G);
+        sockfd_G = -1;
+        write(STDOUT_FILENO, "Sending logout message to Gotham server...\n", 43);
     }
-    if (isSocketOpen(sockfd_W)) {
-        sendMessageToSocket(sockfd_W, 0x07, (int16_t)strlen("CON_KO"), "CON_KO"); 
+    if (SOCKET_isSocketOpen(sockfd_W)) {
+        write(STDOUT_FILENO, "Sending logout message to Worker server...\n", 43);
+        TRAMA_sendMessageToSocket(sockfd_W, 0x07, (int16_t)strlen("CON_KO"), "CON_KO"); 
         close(sockfd_W);
     }
 }
 
+void *connection_watcher() {
+    while (connected) { // Solo verifica mientras esté conectado
+        if (!SOCKET_isSocketOpen(sockfd_G)) {
+            write(STDOUT_FILENO, "Connection to Gotham lost\n", 27);
+            connected = 0;
+            while(1) {
+                if(!SOCKET_isSocketOpen(sockfd_W)) {
+                    if (global_cmd != NULL) {
+                        free(global_cmd);
+                        global_cmd = NULL;
+                    }
+                    free_config();
+                    exit(0);
+                }
+            }
+        }
+        sleep(5); // Verifica cada 5 segundos
+    }
+    return NULL;
+}
+
+
 void terminal() {
     int words;
-    int connected = 0;
 
     while (1) {
         global_cmd = read_command(&words);
@@ -399,21 +226,33 @@ void terminal() {
             } else {
                 if(connectToGotham()) {
                     connected = 1;
+                    pthread_t watcher_thread;
+                    if(pthread_create(&watcher_thread, NULL, connection_watcher, NULL) != 0) {
+                        write(STDOUT_FILENO, "Error: Cannot create thread\n", 29);
+                    } else {
+                        pthread_detach(watcher_thread);
+                    }
                 }
             }
         } else if (strcmp(global_cmd, "LIST MEDIA") == 0) {
-            list_files(config.directory, media_extensions, "media files");
+            FILES_list_files(config.directory, "media files");
         } else if (strcmp(global_cmd, "LIST TEXT") == 0) {
-            list_files(config.directory, text_extensions, "text files");
+            FILES_list_files(config.directory, "text files");
         } else if (strncmp(global_cmd, "DISTORT", 7) == 0 && words == 3) {
-            char* extracted = extract_substring(global_cmd);
-            to_lowercase(extracted);
-            char* type = file_exists_with_type(config.directory, extracted);
-            if(strcmp(type, "Neither") == 0) {  
-                write(STDOUT_FILENO, "File not found\n", 15);
+            if(!connected) {
+                write(STDOUT_FILENO, "Not connected\n", 15);
             } else {
-                write(STDOUT_FILENO, "File exists.\n", 14);
-                distortFile(type, extracted);
+                char* extracted = STRING_extract_substring(global_cmd);
+                STRING_to_lowercase(extracted);
+                char* type = FILES_file_exists_with_type(config.directory, extracted);
+                if(strcmp(type, "Neither") == 0) {  
+                    write(STDOUT_FILENO, "File not found\n", 15);
+                } else {
+                    write(STDOUT_FILENO, "File exists.\n", 14);
+                    distortFile(type, extracted);
+                }
+                free(extracted);
+                free(type);
             }
         } else if (strcmp(global_cmd, "CHECK STATUS") == 0) {
             write(STDOUT_FILENO, "Command OK. Command not ready yet\n", 35);
@@ -428,6 +267,7 @@ void terminal() {
             } else {
                 write(STDOUT_FILENO, "Bye. You were not connected.\n", 30);
             }
+            connected = 0;
             break;
         } else {
             write(STDOUT_FILENO, "Unknown command\n", 17);
@@ -437,7 +277,6 @@ void terminal() {
         global_cmd = NULL;
     }
 }
-
 
 void CTRLC(int signum) {
     print_text("\nInterrupt signal CTRL+C received\n");
@@ -450,7 +289,6 @@ void CTRLC(int signum) {
     exit(1);
 }
 
-
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         write(STDOUT_FILENO, "Usage: Fleck <config_file>\n", 27);
@@ -459,7 +297,7 @@ int main(int argc, char *argv[]) {
 
     signal(SIGINT, CTRLC);
     
-    read_config_file(argv[1]);
+    config = READCONFIG_read_config_fleck(argv[1]);
 
     char* msg;
 

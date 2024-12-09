@@ -3,7 +3,7 @@
 
 /***********************************************
 *
-* @Proposit: LINKEDLIST: Para los Workers (.c)
+* @Proposit: LINKEDLIST: Para los Workers y Flecks (.c)
 * @Autor/s: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
 * @Data creacio: 28/10/2024
 * @Data ultima modificacio: 28/10/2024
