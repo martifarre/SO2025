@@ -97,13 +97,16 @@ char *STRING_to_upper_case(char *str) {
     return str;
 }
 
-
 void STRING_replace(char *old_str, char old, char new) {
-    char *new_str = (char *)malloc(strlen(old_str) * sizeof(char) + 1);
     int old_str_len = (int)strlen(old_str);
+    // Allocate exactly old_str_len + 1 for the new string + null terminator
+    char *new_str = (char *)malloc((old_str_len + 1) * sizeof(char));
+    
     int j = 0;
-    for (int i = 0; i < old_str_len + 1; i++) {
+    // Iterate only through the characters (not including the terminating '\0')
+    for (int i = 0; i < old_str_len; i++) {
         if (old_str[i] == old) {
+            // If we are "removing" the character by replacing it with '\0', skip adding it
             if (new != '\0') {
                 new_str[j] = new;
                 j++;
@@ -113,11 +116,35 @@ void STRING_replace(char *old_str, char old, char new) {
             j++;
         }
     }
+
+    // Add the null terminator after processing all characters
     new_str[j] = '\0';
 
+    // Copy the modified string back to old_str
     strcpy(old_str, new_str);
     free(new_str);
 }
+
+// void STRING_replace(char *old_str, char old, char new) {
+//     char *new_str = (char *)malloc(strlen(old_str) * sizeof(char) + 1);
+//     int old_str_len = (int)strlen(old_str);
+//     int j = 0;
+//     for (int i = 0; i < old_str_len + 1; i++) {
+//         if (old_str[i] == old) {
+//             if (new != '\0') {
+//                 new_str[j] = new;
+//                 j++;
+//             }
+//         } else {
+//             new_str[j] = old_str[i];
+//             j++;
+//         }
+//     }
+//     new_str[j] = '\0';
+
+//     strcpy(old_str, new_str);
+//     free(new_str);
+// }
 
 
 bool STRING_read_line(int fd, int *read_bytes, char **line) {
