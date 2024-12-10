@@ -256,11 +256,6 @@ void terminal() {
                 }
                 if (extracted != NULL) {
                     free(extracted);
-                    extracted = NULL;
-                }
-                if (type != NULL) {
-                    free(type);
-                    type = NULL;
                 }
             }
         } else if (strcmp(global_cmd, "CHECK STATUS") == 0) {

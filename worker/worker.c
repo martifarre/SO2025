@@ -32,58 +32,107 @@ void free_config() {
     free(config.worker_type);
 }
 
-void loopSendFileDistorted (int sockfd, char* filename) {
+void loopSendFileDistorted(int sockfd, char* filename) {
     char* data = (char*)malloc(sizeof(char) * 256);
+    if (!data) {
+        perror("Error allocating memory for data");
+        return;
+    }
+
     int amount = 10;
     sprintf(data, "%d&MD5SUM", amount);
     TRAMA_sendMessageToSocket(sockfd, 0x04, (int16_t)strlen(data), data);
+    free(data);
+
     struct trama wtrama;
-    if(TRAMA_readMessageFromSocket(sockfd, &wtrama) < 0) {
+    wtrama.data = NULL;  // Inicializar
+
+    // Primera lectura
+    if (TRAMA_readMessageFromSocket(sockfd, &wtrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+        if (wtrama.data != NULL) {
+            free(wtrama.data);
+            wtrama.data = NULL;
+        }
         return;
     }
-    for(int i = 0; i < amount; i++) {
+    free(wtrama.data);  
+    wtrama.data = NULL;
+
+    for (int i = 0; i < amount; i++) {
         TRAMA_sendMessageToSocket(sockfd, 0x05, (int16_t)strlen("FileChunk"), "FileChunk");
-        if(TRAMA_readMessageFromSocket(sockfd, &wtrama) < 0) {
+
+        // Liberar la memoria asignada anteriormente antes de sobrescribir
+        if (wtrama.data != NULL) {
+            free(wtrama.data);
+            wtrama.data = NULL;
+        }
+
+        if (TRAMA_readMessageFromSocket(sockfd, &wtrama) < 0) {
             write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+            if (wtrama.data != NULL) {
+                free(wtrama.data);
+                wtrama.data = NULL;
+            }
             return;
-        } else if (wtrama.tipo == 0x07) {
-            write(STDOUT_FILENO, "Worker recieved a CTRL+C.\n", 27);
+        }
+
+        if (wtrama.tipo == 0x07) {
+            write(STDOUT_FILENO, "Worker received a CTRL+C in the middle of the distortion.\n", 59);
+            if (wtrama.data != NULL) {
+                free(wtrama.data);
+                wtrama.data = NULL;
+            }
             return;
         }
     }
+
+    // Liberación final
+    if (wtrama.data != NULL) {
+        free(wtrama.data);
+        wtrama.data = NULL;
+    }
+
     TRAMA_sendMessageToSocket(sockfd, 0x05, (int16_t)strlen("Done"), "Done");
     write(STDOUT_FILENO, "\nFile distorted sent correctly.\n\n", 34);
-    free(data);
 }
 
 void initServer() {
     int socket_fd = SOCKET_initSocket(config.worker_server_port, config.worker_server_ip);
     struct sockaddr_in c_addr;
-    socklen_t c_len = sizeof (c_addr);
+    socklen_t c_len = sizeof(c_addr);
 
-    
-    while(1) {
-        char *data = (char *)malloc(sizeof(char) * 256);
+    char data[256]; // Uso de memoria en la pila
+    while (1) {
+        memset(data, '\0', 256);
 
-        fleckSock = accept(socket_fd, (void *) &c_addr, &c_len);
+        fleckSock = accept(socket_fd, (void *)&c_addr, &c_len);
         if (fleckSock < 0) {
             write(STDOUT_FILENO, "Error: Cannot accept connection\n", 33);
-            exit (EXIT_FAILURE);
+            exit(EXIT_FAILURE);
         }
 
         struct trama wtrama;
-        if(TRAMA_readMessageFromSocket(fleckSock, &wtrama) < 0) {
+        if (TRAMA_readMessageFromSocket(fleckSock, &wtrama) < 0) {
             write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+            free(wtrama.data);
+            close(fleckSock);
+            fleckSock = -1;
+            continue; // Saltar al siguiente ciclo del bucle
         }
-        sprintf(data, "Fleck username: %s, File to distort: %s", STRING_getXFromMessage((const char *)wtrama.data, 0), STRING_getXFromMessage((const char *)wtrama.data, 1));
+
+        char* extracted = STRING_getXFromMessage((const char *)wtrama.data, 0);
+        char* extracted2 = STRING_getXFromMessage((const char *)wtrama.data, 1);
+        sprintf(data, "Fleck username: %s, File to distort: %s", extracted, extracted2);
         write(STDOUT_FILENO, data, strlen(data));
 
-        TRAMA_sendMessageToSocket(fleckSock, 0x03, 0, ""); //Indicar que se puede empezar a enviar el archvio.
-        //TRAMA_sendMessageToSocket(fleckSock, 0x03, (int16_t)strlen("CON_KO"), "CON_KO"); //Error, no se puede enviar archivo.
-        
-        loopSendFileDistorted(fleckSock, STRING_getXFromMessage((const char *)wtrama.data, 1));
-    
+        TRAMA_sendMessageToSocket(fleckSock, 0x03, 0, ""); // Indicar que se puede empezar a enviar el archivo.
+        // TRAMA_sendMessageToSocket(fleckSock, 0x03, (int16_t)strlen("CON_KO"), "CON_KO"); // Error, no se puede enviar archivo.
+
+        loopSendFileDistorted(fleckSock, extracted2);
+        free(extracted);
+        free(extracted2);
+        free(wtrama.data);
         close(fleckSock);
         fleckSock = -1;
     }
@@ -96,7 +145,6 @@ void doLogout() {
     }
 
     write(STDOUT_FILENO, "Sending logout message to Gotham server...\n", 43);
-    int sockfd = SOCKET_createSocket(config.gotham_server_port, config.gotham_server_ip);
     TRAMA_sendMessageToSocket(sockfd, 0x07, (int16_t)strlen(config.worker_type),config.worker_type);
     close(sockfd);
 }
@@ -133,17 +181,16 @@ int main(int argc, char *argv[]) {
 
     signal(SIGINT, CTRLC);
 
-    char *msg = (char *)malloc(sizeof(char) * 256);
     char *data = (char *)malloc(sizeof(char) * 256);
-
 
     config = READCONFIG_read_config_worker(argv[1]);
     
     write(STDOUT_FILENO, "\nWorker initialized\n\n", 22);
 
-    sprintf(msg, "Connecting %s Server to the Gotham system...\n\n", config.directory);
-    print_text(msg);
-    free(msg);
+    sprintf(data, "Connecting %s Server to the Gotham system...\n\n", config.directory);
+    write(STDOUT_FILENO, data, strlen(data));
+    memset(data, '\0', 256);
+
     sockfd = SOCKET_createSocket(config.gotham_server_port, config.gotham_server_ip);
     if(sockfd < 0) {
         write(STDOUT_FILENO, "Error: Cannot connect to Gotham server\n", 40);
@@ -155,6 +202,7 @@ int main(int argc, char *argv[]) {
     write(STDOUT_FILENO, "Successfully connected to Gotham.\n", 35);
     sprintf(data, "%s&%s&%s", config.worker_type, config.worker_server_ip, config.worker_server_port);
     TRAMA_sendMessageToSocket(sockfd, 0x02, (int16_t)strlen(data), data);    
+    free(data);
 
     struct trama wtrama;
     if(TRAMA_readMessageFromSocket(sockfd, &wtrama) < 0) {
@@ -162,6 +210,7 @@ int main(int argc, char *argv[]) {
     } else if(strcmp((const char *)wtrama.data, "CON_KO") == 0) {
         write(STDOUT_FILENO, "Error: Connection not validated.\n", 34);
     }
+    free(wtrama.data);
 
     pthread_t watcher_thread;
     if(pthread_create(&watcher_thread, NULL, connection_watcher, NULL) != 0) {
@@ -174,7 +223,6 @@ int main(int argc, char *argv[]) {
     initServer();
 
     close(sockfd);
-    free(data); 
     free_config();
 
     return 0;
