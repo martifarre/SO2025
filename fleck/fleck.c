@@ -195,19 +195,27 @@ void doLogout () {
     }
 }
 
+void CTRLC(int signum) {
+    print_text("\nInterrupt signal CTRL+C received\n");
+    doLogout();
+    if (global_cmd != NULL) {
+        free(global_cmd);
+        global_cmd = NULL;
+    }
+    free_config();
+    signal(SIGINT, SIG_DFL);
+    raise(SIGINT);
+}
+
 void *connection_watcher() {
     while (connected) { // Solo verifica mientras esté conectado
         if (!SOCKET_isSocketOpen(sockfd_G)) {
             write(STDOUT_FILENO, "Connection to Gotham lost\n", 27);
             connected = 0;
+            close(sockfd_G);
             while(1) {
                 if(!SOCKET_isSocketOpen(sockfd_W)) {
-                    if (global_cmd != NULL) {
-                        free(global_cmd);
-                        global_cmd = NULL;
-                    }
-                    free_config();
-                    exit(0);
+                    CTRLC(0);
                 }
             }
         }
@@ -280,17 +288,6 @@ void terminal() {
         free(global_cmd);
         global_cmd = NULL;
     }
-}
-
-void CTRLC(int signum) {
-    print_text("\nInterrupt signal CTRL+C received\n");
-    doLogout();
-    if (global_cmd != NULL) {
-        free(global_cmd);
-        global_cmd = NULL;
-    }
-    free_config();
-    exit(1);
 }
 
 int main(int argc, char *argv[]) {

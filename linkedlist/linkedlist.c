@@ -177,7 +177,6 @@ void 	LINKEDLIST_add (LinkedList list, Element element) {
 	}
 }
 
-
 /**************************************************************************** 
  *
  * @Objective: Removes the element currently at the point of view in this 
@@ -333,6 +332,58 @@ int 	LINKEDLIST_isAtEnd (LinkedList list) {
 	return NULL == list->previous->next;
 }
 
+void LINKEDLIST_clear(LinkedList list) {
+    LINKEDLIST_goToHead(list);
+    while (!LINKEDLIST_isEmpty(list)) {
+        LINKEDLIST_remove(list);  // Suponiendo que tienes una función para eliminar el elemento actual
+    }
+}
+
+void LINKEDLIST_shuffle(LinkedList list) {
+    if (LINKEDLIST_isEmpty(list)) {
+        return;  // Lista vacía, no hay nada que barajar
+    }
+
+    // Contar los elementos de la lista
+    int count = 0;
+    LINKEDLIST_goToHead(list);
+    while (!LINKEDLIST_isAtEnd(list)) {
+        LINKEDLIST_next(list);
+        count++;
+    }
+
+    // Copiar elementos a un array
+    Element* array = (Element*)malloc(count * sizeof(Element));
+    if (array == NULL) {
+        // Si hay error al reservar memoria, salir sin modificar la lista
+        return;
+    }
+
+    LINKEDLIST_goToHead(list);
+    for (int i = 0; i < count; i++) {
+        array[i] = LINKEDLIST_get(list);  // Suponiendo que LINKEDLIST_get devuelve el elemento actual
+        LINKEDLIST_next(list);
+    }
+
+    // Barajar el array con el algoritmo Fisher-Yates
+    srand(time(NULL));
+    for (int i = count - 1; i > 0; i--) {
+        int j = rand() % (i + 1);
+        Element temp = array[i];
+        array[i] = array[j];
+        array[j] = temp;
+    }
+
+    // Vaciar la lista original y reconstruir con el nuevo orden
+    LINKEDLIST_clear(list);  // Suponiendo que tienes una función para vaciar la lista
+
+    for (int i = 0; i < count; i++) {
+        LINKEDLIST_add(list, array[i]);  // Agregar los elementos barajados a la lista
+    }
+
+    free(array);  // Liberar la memoria del array
+}
+
 
 /**************************************************************************** 
  *
@@ -362,25 +413,6 @@ void 	LINKEDLIST_destroy (LinkedList* list) {
 	free(*list);
 	*list = NULL;
 }
-
-/*
- * Another implementation of the destroy.
- *
-
-void LINKEDLIST_destroy (LinkedList* list) {
-	LINKEDLIST_goToHead(*list);
-	while(!LINKEDLIST_isEmpty(*list)) {
-		LINKEDLIST_remove(*list);
-	}
-	free((*list)->head);
-	(*list)->head = NULL;
-	(*list)->previous = NULL;
-
-	free(*list);
-	*list = NULL;
-}
-
-*/
 
 /**************************************************************************** 
  *

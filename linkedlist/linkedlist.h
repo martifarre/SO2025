@@ -15,6 +15,8 @@
 #ifndef LINKEDLIST_H
 #define LINKEDLIST_H
 
+#include <stdlib.h>
+#include <time.h>
 
 // Constants to manage the list's error codes.
 #define LIST_NO_ERROR 0
@@ -146,6 +148,13 @@ void 	LINKEDLIST_next (LinkedList list);
  *
  ****************************************************************************/
 int 	LINKEDLIST_isAtEnd (LinkedList list);
+
+
+//dos nuevas funciones
+void LINKEDLIST_clear(LinkedList list);
+void LINKEDLIST_shuffle(LinkedList list);
+
+
 
 
 /**************************************************************************** 

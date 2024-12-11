@@ -15,7 +15,7 @@
 // Variable global para almacenar la configuración
 WorkerConfig config;
 
-int fleckSock = -1, sockfd = -1;
+int fleckSock = -1, sockfd = -1, fleck_connecter_fd = -1;
 /***********************************************
 *
 * @Finalidad: Liberar la memoria asignada dinámicamente para la configuración.
@@ -98,7 +98,7 @@ void loopSendFileDistorted(int sockfd, char* filename) {
 }
 
 void initServer() {
-    int socket_fd = SOCKET_initSocket(config.worker_server_port, config.worker_server_ip);
+    fleck_connecter_fd = SOCKET_initSocket(config.worker_server_port, config.worker_server_ip);
     struct sockaddr_in c_addr;
     socklen_t c_len = sizeof(c_addr);
 
@@ -106,7 +106,7 @@ void initServer() {
     while (1) {
         memset(data, '\0', 256);
 
-        fleckSock = accept(socket_fd, (void *)&c_addr, &c_len);
+        fleckSock = accept(fleck_connecter_fd, (void *)&c_addr, &c_len);
         if (fleckSock < 0) {
             write(STDOUT_FILENO, "Error: Cannot accept connection\n", 33);
             exit(EXIT_FAILURE);
@@ -144,14 +144,17 @@ void doLogout() {
         close(fleckSock);
     }
 
-    write(STDOUT_FILENO, "Sending logout message to Gotham server...\n", 43);
-    TRAMA_sendMessageToSocket(sockfd, 0x07, (int16_t)strlen(config.worker_type),config.worker_type);
-    close(sockfd);
+    if(SOCKET_isSocketOpen(sockfd)) {
+        write(STDOUT_FILENO, "Sending logout message to Gotham server...\n", 43);
+        TRAMA_sendMessageToSocket(sockfd, 0x07, (int16_t)strlen(config.worker_type),config.worker_type);
+        close(sockfd);
+    }
 }
 
 void CTRLC(int signum) {
     print_text("\nInterrupt signal CTRL+C received\n");
     doLogout();
+    close(fleck_connecter_fd);
     free_config();
     signal(SIGINT, SIG_DFL);
     raise(SIGINT);
@@ -161,10 +164,10 @@ void *connection_watcher() {
     while (1) {
         if (!SOCKET_isSocketOpen(sockfd)) {
             write(STDOUT_FILENO, "Connection to Gotham lost\n", 27);
+            close(sockfd);
             while(1) {
                 if(!SOCKET_isSocketOpen(fleckSock)) {
-                    free_config();
-                    exit(0);
+                    CTRLC(0);
                 }
             }
         }

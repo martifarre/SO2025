@@ -18,6 +18,8 @@ GothamConfig config;
 LinkedList listW; 
 LinkedList listF;
 
+int fleck_connecter_fd = -1, worker_connecter_fd = -1;
+
 void free_config() {
     free(config.fleck_server_ip);
     free(config.fleck_server_port); // Liberar la memoria del puerto
@@ -148,14 +150,14 @@ void* threadFleck(void* arg) {
 }
 
 void* funcThreadFleckConnecter() {
-    int socket_fd = SOCKET_initSocket(config.fleck_server_port, config.fleck_server_ip);
+    fleck_connecter_fd = SOCKET_initSocket(config.fleck_server_port, config.fleck_server_ip);
     
     int newsock;
     struct sockaddr_in c_addr;
     socklen_t c_len = sizeof (c_addr);
 
     while(1) {
-        newsock = accept(socket_fd, (void *) &c_addr, &c_len);
+        newsock = accept(fleck_connecter_fd, (void *) &c_addr, &c_len);
         if (newsock < 0) {
             write(STDOUT_FILENO, "Error: Cannot accept connection\n", 33);
             exit (EXIT_FAILURE);
@@ -248,7 +250,6 @@ void* threadWorker(void* arg) {
                 listElement* currentElement = LINKEDLIST_get(listW);
                 if (strcmp(currentElement->worker_type, (const char *)gtrama.data) == 0 
                     && currentElement->sockfd == newsock) {
-                    
                     free(currentElement->ip);
                     free(currentElement->port);
                     free(currentElement->worker_type);
@@ -259,6 +260,7 @@ void* threadWorker(void* arg) {
                 LINKEDLIST_next(listW);
             }
             write(STDOUT_FILENO, "Worker was disconnected.\n\n", 27);
+            LINKEDLIST_shuffle(listW);
             free(gtrama.data);  // Liberar gtrama.data tras procesar
             gtrama.data = NULL;
             break;  // Salir del bucle
@@ -273,14 +275,14 @@ void* threadWorker(void* arg) {
 }
 
 void* funcThreadWorkerConnecter() {
-    int socket_fd = SOCKET_initSocket(config.external_server_port, config.external_server_ip);
+    worker_connecter_fd = SOCKET_initSocket(config.external_server_port, config.external_server_ip);
     
     int newsock;
     struct sockaddr_in c_addr;
     socklen_t c_len = sizeof (c_addr);
 
     while(1) {
-        newsock = accept(socket_fd, (void *) &c_addr, &c_len);
+        newsock = accept(worker_connecter_fd, (void *) &c_addr, &c_len);
         if (newsock < 0) {
             write(STDOUT_FILENO, "Error: Cannot accept connection\n", 33);
             exit (EXIT_FAILURE);
@@ -323,6 +325,8 @@ void doLogout() {
 void CTRLC(int signum) {
     print_text("\nInterrupt signal CTRL+C received\n");
     doLogout();
+    close(fleck_connecter_fd);
+    close(worker_connecter_fd);
     LINKEDLIST_destroy(&listF);
     LINKEDLIST_destroy(&listW);
     free_config();

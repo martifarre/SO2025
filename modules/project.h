@@ -8,5 +8,6 @@
 #include "trama.h"
 #include "socket.h"
 #include "readconfig.h"
+#include "so_compression.h"
 
 #endif // PROJECT_H
