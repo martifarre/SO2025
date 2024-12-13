@@ -24,6 +24,12 @@ int ongoing_text_distortion = 0;
 
 int connected = 0;
 
+// Thread for connection watcher
+pthread_t watcher_thread;
+int watcher_thread_running = 0; // To track if watcher_thread was started
+
+volatile sig_atomic_t shutdown_requested = 0; // Signal handling flag
+
 /***********************************************
 *
 * @Finalidad: Liberar la memoria asignada dinámicamente para la configuración.
@@ -35,7 +41,7 @@ void free_config() {
     free(config.username);
     free(config.directory);
     free(config.server_ip);
-    free(config.server_port); // Liberar la memoria del puerto
+    free(config.server_port);
 }
 
 char *read_command(int *words) {
@@ -57,7 +63,7 @@ int connectToGotham() {
     sockfd_G = SOCKET_createSocket(config.server_port, config.server_ip);
     if (sockfd_G < 0) {
         write(STDOUT_FILENO, "Error: Cannot connect to Gotham\n", 33);
-        free(message);  // Liberar antes de retornar
+        free(message);
         return 0;
     }
 
@@ -68,15 +74,14 @@ int connectToGotham() {
     if (TRAMA_readMessageFromSocket(sockfd_G, &ftrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
         close(sockfd_G);
-        free(message);  // Liberar antes de retornar
+        free(message);
         return 0;
     }
 
     free(ftrama.data);
-    free(message);  // Liberar antes de retornar
+    free(message);
     return 1;
 }
-
 
 void loopRecieveFileDistorted (int sockfd, char* filename) {
     struct trama ftrama;
@@ -99,11 +104,12 @@ void loopRecieveFileDistorted (int sockfd, char* filename) {
             return;
         } else if(strcmp((const char *)ftrama.data, "Done") == 0) {
             write(STDOUT_FILENO, "Something is wrong.\n", 21);
+            free(ftrama.data);
             break;
         } else {
-           TRAMA_sendMessageToSocket(sockfd, 0x03, 0, "");
+            TRAMA_sendMessageToSocket(sockfd, 0x03, 0, "");
+            free(ftrama.data);
         }
-        free(ftrama.data);
     }
     if(TRAMA_readMessageFromSocket(sockfd, &ftrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
@@ -141,6 +147,7 @@ void distortFile (char* type, char* filename) {
     struct trama ftrama;
     if(TRAMA_readMessageFromSocket(sockfd_G, &ftrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+        free(data);
         return;
     }
     if(strcmp((const char *)ftrama.data, "DISTORT_KO") == 0) {
@@ -149,29 +156,35 @@ void distortFile (char* type, char* filename) {
     } else {
         char *extracted1 = STRING_getXFromMessage((const char *)ftrama.data, 1);
         char *extracted2 = STRING_getXFromMessage((const char *)ftrama.data, 0);
-        sockfd_W = SOCKET_createSocket(extracted1, extracted2);
         free(ftrama.data);  
         memset(data, '\0', 256);
         sprintf(data, "%s&%s", config.username, filename);
+        sockfd_W = SOCKET_createSocket(extracted1, extracted2);
         TRAMA_sendMessageToSocket(sockfd_W, 0x03, (int16_t)strlen(data), data);
         if(TRAMA_readMessageFromSocket(sockfd_W, &ftrama) < 0) {
             write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+            free(extracted1);
+            free(extracted2);
+            free(data);
             return;
         }
         if(strcmp((const char *)ftrama.data, "CON_KO") == 0) {
             write(STDOUT_FILENO, "ERROR: File could not be distorted\n", 36);
         } else {
             write(STDOUT_FILENO, "File starting to distort.\n", 27);
+            free(ftrama.data);
+            ftrama.data = NULL;
             loopRecieveFileDistorted(sockfd_W, filename);
+            // If loopRecieveFileDistorted doesn't read ftrama here, no problem
         }
-        free(ftrama.data);
+
+        if (ftrama.data) free(ftrama.data);
         free(extracted1);
         free(extracted2);
         close(sockfd_W);
         sockfd_W = -1;
     }
 
-    // Reset 
     if (strcmp(type, "Media") == 0) {
         ongoing_media_distortion = 0;
     } else if (strcmp(type, "Text") == 0) {
@@ -197,39 +210,60 @@ void doLogout () {
 
 void CTRLC(int signum) {
     print_text("\nInterrupt signal CTRL+C received\n");
+    
+
+    // Cleanup
     doLogout();
+    connected = 0;
+
+    shutdown_requested = 1;
+    // Cancel watcher thread if running
+    if (watcher_thread_running) {
+        pthread_cancel(watcher_thread);
+    }
+
+    // Free global_cmd if allocated
     if (global_cmd != NULL) {
         free(global_cmd);
         global_cmd = NULL;
     }
+
     free_config();
-    signal(SIGINT, SIG_DFL);
-    raise(SIGINT);
+    //join i despues haz un exit, porque si no hacemos un exit se queda en modo espera de comandos, como si hiceramos un logout
+    pthread_join(watcher_thread, NULL);
+    exit(0);
+    // Do not raise SIGINT or reset signal handler.
+    // We'll just let main return after terminal() ends.
 }
 
-void *connection_watcher() {
-    while (connected) { // Solo verifica mientras esté conectado
+void *connection_watcher(void* arg) {
+    while (connected && !shutdown_requested) {
         if (!SOCKET_isSocketOpen(sockfd_G)) {
             write(STDOUT_FILENO, "Connection to Gotham lost\n", 27);
             connected = 0;
             close(sockfd_G);
-            while(1) {
-                if(!SOCKET_isSocketOpen(sockfd_W)) {
-                    CTRLC(0);
-                }
-            }
+            sockfd_G = -1;
+            // If connection is lost, simulate a CTRL+C scenario or logout:
+            shutdown_requested = 1;
+            break;
         }
-        sleep(5); // Verifica cada 5 segundos
+        sleep(5); // Sleep is a cancellation point
     }
     return NULL;
 }
 
-
 void terminal() {
     int words;
 
-    while (1) {
+    while (!shutdown_requested) {
         global_cmd = read_command(&words);
+
+        if (shutdown_requested) { 
+            // If shutdown was requested during read_command()
+            free(global_cmd);
+            global_cmd = NULL;
+            break;
+        }
 
         if (strcmp(global_cmd, "CONNECT") == 0) {
             if(connected) {
@@ -237,11 +271,10 @@ void terminal() {
             } else {
                 if(connectToGotham()) {
                     connected = 1;
-                    pthread_t watcher_thread;
-                    if(pthread_create(&watcher_thread, NULL, connection_watcher, NULL) != 0) {
+                    if (pthread_create(&watcher_thread, NULL, connection_watcher, NULL) != 0) {
                         write(STDOUT_FILENO, "Error: Cannot create thread\n", 29);
                     } else {
-                        pthread_detach(watcher_thread);
+                        watcher_thread_running = 1;
                     }
                 }
             }
@@ -262,9 +295,7 @@ void terminal() {
                     write(STDOUT_FILENO, "File exists.\n", 14);
                     distortFile(type, extracted);
                 }
-                if (extracted != NULL) {
-                    free(extracted);
-                }
+                free(extracted);
             }
         } else if (strcmp(global_cmd, "CHECK STATUS") == 0) {
             write(STDOUT_FILENO, "Command OK. Command not ready yet\n", 35);
@@ -276,11 +307,12 @@ void terminal() {
             global_cmd = NULL;
             if(connected) {
                 doLogout();
+                connected = 0;
             } else {
                 write(STDOUT_FILENO, "Bye. You were not connected.\n", 30);
+                break;
             }
-            connected = 0;
-            break;
+            
         } else {
             write(STDOUT_FILENO, "Unknown command\n", 17);
         }
@@ -301,13 +333,23 @@ int main(int argc, char *argv[]) {
     config = READCONFIG_read_config_fleck(argv[1]);
 
     char* msg;
-
     asprintf(&msg, "\n%s user initialized\n", config.username);
     print_text(msg);
     free(msg);
 
     terminal();
 
+    // If watcher_thread was created and is still running, join it
+    if (watcher_thread_running) {
+        pthread_cancel(watcher_thread);
+        pthread_join(watcher_thread, NULL);
+    }
+
+    // Cleanup if not done yet
+    if (global_cmd != NULL) {
+        free(global_cmd);
+        global_cmd = NULL;
+    }
     free_config();
 
     return 0;
