@@ -9,5 +9,6 @@
 #include "socket.h"
 #include "readconfig.h"
 #include "so_compression.h"
+#include "distorsion.h"
 
 #endif // PROJECT_H

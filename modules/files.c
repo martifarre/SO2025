@@ -20,8 +20,8 @@ int FILES_has_extension(const char *filename, const char **extensions) {
 void FILES_list_files(const char *directory, const char *label) {
     if (!directory || !label) return; // Validación de entrada
 
-    const char *media_extensions[] = {".wav", ".png", ".jpg", ".jpeg", ".mp3", ".mp4", NULL};
-    const char *text_extensions[] = {".txt", ".dat", NULL};
+    const char *media_extensions[] = {".wav", ".png", ".jpg", ".jpeg", ".bmp", ".tga", NULL};
+    const char *text_extensions[] = {".txt", NULL};
 
     const char **extensions = (strcasecmp(label, "media files") == 0) ? media_extensions : text_extensions;
 
@@ -64,8 +64,8 @@ void FILES_list_files(const char *directory, const char *label) {
 char* FILES_file_exists_with_type(const char *directory, const char *file_name) {
     if (!directory || !file_name) return "Neither"; // Validación de entrada
 
-    const char *media_extensions[] = {".wav", ".png", ".jpg", ".jpeg", ".mp3", ".mp4", NULL};
-    const char *text_extensions[] = {".txt", ".dat", NULL};
+    const char *media_extensions[] = {".wav", ".png", ".jpg", ".jpeg", ".bmp", ".tga", NULL};
+    const char *text_extensions[] = {".txt", NULL};
 
     DIR *dir;
     struct dirent *entry;
@@ -91,3 +91,24 @@ char* FILES_file_exists_with_type(const char *directory, const char *file_name) 
     closedir(dir);
     return result;
 }
+
+char* FILES_get_size_of_file(char* path) {
+    int fileDescriptor = open(path, O_RDONLY);
+    if (fileDescriptor < 0) {
+        write(STDERR_FILENO, "Error: Cannot open file\n", 25);
+        return NULL;
+    }
+    
+    off_t sizeOfFile = lseek(fileDescriptor, 0, SEEK_END);
+    close(fileDescriptor);
+
+    char *resultString = (char*)malloc(sizeof(char) * 30);
+    if (!resultString) {
+        perror("Failed to allocate memory \n");
+        return NULL;
+    }
+    sprintf(resultString, "%ld", (long)sizeOfFile);
+
+    return resultString;
+}
+

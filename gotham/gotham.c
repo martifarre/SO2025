@@ -12,7 +12,6 @@
 #define _GNU_SOURCE
 #include "../modules/project.h"
 
-
 // Variable global para almacenar la configuración
 GothamConfig config;
 
@@ -21,42 +20,14 @@ LinkedList listF;
 
 int fleck_connecter_fd = -1, worker_connecter_fd = -1;
 
-// Global shutdown flag
-volatile sig_atomic_t shutdown_requested = 0;
-
-// Thread IDs for the main listener threads
-pthread_t thread_WorkerConnecter;
-pthread_t thread_FleckConnecter;
-
-// Arrays to store Fleck and Worker thread IDs
-// For simplicity, assume a maximum number of connected threads
-#define MAX_FLECK_THREADS 1024
-#define MAX_WORKER_THREADS 1024
-
-static pthread_t fleck_threads[MAX_FLECK_THREADS];
-static size_t fleck_count = 0;
-
-static pthread_t worker_threads[MAX_WORKER_THREADS];
-static size_t worker_count = 0;
-
-void register_fleck_thread(pthread_t tid) {
-    if (fleck_count < MAX_FLECK_THREADS) {
-        fleck_threads[fleck_count++] = tid;
-    }
-}
-
-void register_worker_thread(pthread_t tid) {
-    if (worker_count < MAX_WORKER_THREADS) {
-        worker_threads[worker_count++] = tid;
-    }
-}
-
 void free_config() {
     free(config.fleck_server_ip);
-    free(config.fleck_server_port);
+    free(config.fleck_server_port); // Liberar la memoria del puerto
     free(config.external_server_ip);
-    free(config.external_server_port);
+    free(config.external_server_port); // Liberar la memoria del puerto
 }
+
+int i = 0;
 
 void searchWorkerAndSendInfo(int fleckSock, char* type) {
     listElement* element = NULL;
@@ -96,12 +67,17 @@ void* threadFleck(void* arg) {
     int fleckSock = *(int*)arg;
     struct trama gtrama;
 
+    // First message read from Fleck
     if (TRAMA_readMessageFromSocket(fleckSock, &gtrama) < 0) {
+        write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
         return NULL;
     }
     
+    // Process the first message
     if (gtrama.tipo == 0x01) {
         char* username = STRING_getXFromMessage((const char *)gtrama.data, 0);
+        
+        // We no longer need gtrama.data after extracting username
         free(gtrama.data); 
         gtrama.data = NULL;
 
@@ -116,11 +92,14 @@ void* threadFleck(void* arg) {
         TRAMA_sendMessageToSocket(fleckSock, 0x01, 0, "");
         free(data);
 
-        while (!shutdown_requested) {
+        // Now enter the loop to read subsequent messages
+        while (1) {
             if (TRAMA_readMessageFromSocket(fleckSock, &gtrama) < 0) {
-                break;
+                write(STDOUT_FILENO, "Error: Checksum not validated..\n", 32);
+                return NULL;
             }
             
+            // Process subsequent messages
             if (gtrama.tipo == 0x10) {
                 if (strcmp((const char *)gtrama.data, "CON_KO") == 0) {
                     write(STDOUT_FILENO, "Error: Distortion of this type already in progress.\n", 53);
@@ -128,10 +107,12 @@ void* threadFleck(void* arg) {
                     gtrama.data = NULL;
                 } else {
                     char* type = STRING_getXFromMessage((const char *)gtrama.data, 0);
+
                     free(gtrama.data); 
                     gtrama.data = NULL;
                     
                     searchWorkerAndSendInfo(fleckSock, type);
+
                     free(type);
                 }
             } else if (gtrama.tipo == 0x07) {
@@ -139,6 +120,7 @@ void* threadFleck(void* arg) {
                 while(!LINKEDLIST_isAtEnd(listF)) {
                     listElement* currentElement = LINKEDLIST_get(listF);
                     if(strcmp(currentElement->fleck_username, (const char *)gtrama.data) == 0 && currentElement->sockfd == fleckSock) {
+                        // Finish using gtrama.data after comparison
                         free(gtrama.data); 
                         gtrama.data = NULL;
 
@@ -152,11 +134,13 @@ void* threadFleck(void* arg) {
                 write(STDOUT_FILENO, "Fleck was disconnected.\n\n", 26);
                 break;
             } else {
+                // If other message types appear, ensure to free gtrama.data after using it:
                 free(gtrama.data);
                 gtrama.data = NULL;
             }
         }
     } else {
+        // If the first message isn't 0x01, we've read it but not used gtrama.data:
         free(gtrama.data);
         gtrama.data = NULL;
     }
@@ -165,51 +149,53 @@ void* threadFleck(void* arg) {
     return NULL;
 }
 
-void* funcThreadFleckConnecter(void* arg) {
+void* funcThreadFleckConnecter() {
     fleck_connecter_fd = SOCKET_initSocket(config.fleck_server_port, config.fleck_server_ip);
+    
     int newsock;
     struct sockaddr_in c_addr;
     socklen_t c_len = sizeof (c_addr);
 
-    while(!shutdown_requested) {
+    while(1) {
         newsock = accept(fleck_connecter_fd, (void *) &c_addr, &c_len);
         if (newsock < 0) {
-            if (shutdown_requested) break;
             write(STDOUT_FILENO, "Error: Cannot accept connection\n", 33);
-            break;
+            exit (EXIT_FAILURE);
         }
 
         pthread_t thread_newFleck;
-        pthread_create(&thread_newFleck, NULL, threadFleck, &newsock);
-        register_fleck_thread(thread_newFleck);
-        // No pthread_detach here
+        pthread_create(&thread_newFleck, NULL, threadFleck, &newsock); 
+        pthread_detach(thread_newFleck);
     }
-    return NULL;
 }
 
 void* threadWorker(void* arg) {
     int newsock = *(int*)arg;
-    char* aux = (char*)malloc(sizeof(char) * 256);
+    char* aux = (char*)malloc(sizeof(char) * 256);  // Para mensajes temporales
     if (!aux) {
         perror("Error: Memory allocation for aux failed");
         return NULL;
     }
 
     struct trama gtrama;
+
+    // Leer el primer mensaje
     if (TRAMA_readMessageFromSocket(newsock, &gtrama) < 0) {
-        free(aux);
+        write(STDOUT_FILENO, "Error: Checksum not validated...\n", 34);
+        free(aux);  // Liberar aux antes de salir
         return NULL;
     }
 
     if (gtrama.tipo == 0x02) {
+        // Parsear los campos
         char* worker_type = STRING_getXFromMessage((const char *)gtrama.data, 0);
         char* ip          = STRING_getXFromMessage((const char *)gtrama.data, 1);
         char* port        = STRING_getXFromMessage((const char *)gtrama.data, 2);
 
-        free(gtrama.data);
+        free(gtrama.data);  // Liberar gtrama.data después de usarlo
         gtrama.data = NULL;
 
-        if (!worker_type || !ip || !port) {
+        if (!worker_type || !ip || !port) {  // Validar asignación de campos
             write(STDOUT_FILENO, "Error: Invalid worker message.\n", 32);
             free(worker_type);
             free(ip);
@@ -219,6 +205,7 @@ void* threadWorker(void* arg) {
             return NULL;
         }
 
+        // Crear y añadir elemento a la lista
         listElement* element = (listElement*)malloc(sizeof(listElement));
         if (!element) {
             perror("Error: Memory allocation for listElement failed");
@@ -247,14 +234,17 @@ void* threadWorker(void* arg) {
         return NULL;
     }
 
-    free(aux);
+    free(aux);  // Liberar aux tras el uso inicial
 
-    while (!shutdown_requested) {
+    while (1) {
         if (TRAMA_readMessageFromSocket(newsock, &gtrama) < 0) {
-            break;
+            write(STDOUT_FILENO, "Error: Checksum not validated....\n", 35);
+            free(gtrama.data);
+            break;  // Salir del bucle
         }
 
         if (gtrama.tipo == 0x07) {
+            // Buscar y eliminar el elemento de la lista
             LINKEDLIST_goToHead(listW);
             while (!LINKEDLIST_isAtEnd(listW)) {
                 listElement* currentElement = LINKEDLIST_get(listW);
@@ -271,40 +261,38 @@ void* threadWorker(void* arg) {
             }
             write(STDOUT_FILENO, "Worker was disconnected.\n\n", 27);
             LINKEDLIST_shuffle(listW);
-            free(gtrama.data);
+            free(gtrama.data);  // Liberar gtrama.data tras procesar
             gtrama.data = NULL;
-            break;
+            break;  // Salir del bucle
         }
 
-        free(gtrama.data);
+        free(gtrama.data);  // Liberar gtrama.data tras procesar
         gtrama.data = NULL;
     }
 
-    close(newsock);
+    close(newsock);  // Cerrar el socket al final
     return NULL;
 }
 
-void* funcThreadWorkerConnecter(void* arg) {
+void* funcThreadWorkerConnecter() {
     worker_connecter_fd = SOCKET_initSocket(config.external_server_port, config.external_server_ip);
+    
     int newsock;
     struct sockaddr_in c_addr;
     socklen_t c_len = sizeof (c_addr);
 
-    while(!shutdown_requested) {
+    while(1) {
         newsock = accept(worker_connecter_fd, (void *) &c_addr, &c_len);
         if (newsock < 0) {
-            if (shutdown_requested) break;
             write(STDOUT_FILENO, "Error: Cannot accept connection\n", 33);
-            break;
+            exit (EXIT_FAILURE);
         }
         write(STDOUT_FILENO, "Worker connected\n\n", 19);
 
         pthread_t thread_newWorker;
-        pthread_create(&thread_newWorker, NULL, threadWorker, &newsock);
-        register_worker_thread(thread_newWorker);
-        // No pthread_detach here
+        pthread_create(&thread_newWorker, NULL, threadWorker, &newsock); 
+        pthread_detach(thread_newWorker);
     }
-    return NULL;
 }
 
 void doLogout() {
@@ -316,6 +304,7 @@ void doLogout() {
         free(currentElement->fleck_username);
         free(currentElement);
         LINKEDLIST_remove(listF);
+        //LINKEDLIST_next(listF);
     }
 
     LINKEDLIST_goToHead(listW);
@@ -327,30 +316,22 @@ void doLogout() {
         free(currentElement->port);
         free(currentElement->worker_type);
         free(currentElement);
+
         LINKEDLIST_remove(listW);
+        //LINKEDLIST_next(listW);
     }
 }
 
 void CTRLC(int signum) {
-    write(STDOUT_FILENO, "\nInterrupt signal CTRL+C received\n", 34);
-
-    shutdown_requested = 1;
-
-    // Cancel main listener threads
-    pthread_cancel(thread_WorkerConnecter);
-    pthread_cancel(thread_FleckConnecter);
-
-    // Cancel all Fleck threads
-    for (size_t i = 0; i < fleck_count; i++) {
-        pthread_cancel(fleck_threads[i]);
-    }
-
-    // Cancel all Worker threads
-    for (size_t i = 0; i < worker_count; i++) {
-        pthread_cancel(worker_threads[i]);
-    }
-
-    // No raise(SIGINT), just return to allow proper cleanup
+    print_text("\nInterrupt signal CTRL+C received\n");
+    doLogout();
+    close(fleck_connecter_fd);
+    close(worker_connecter_fd);
+    LINKEDLIST_destroy(&listF);
+    LINKEDLIST_destroy(&listW);
+    free_config();
+    signal(SIGINT, SIG_DFL);
+    raise(SIGINT);
 }
 
 int main(int argc, char *argv[]) {
@@ -364,6 +345,7 @@ int main(int argc, char *argv[]) {
     config = READCONFIG_read_config_gotham(argv[1]);
 
     char *msg;
+
     asprintf(&msg, "\nGotham server initialized.\nWaiting for connections...\n\n");
     print_text(msg);
     free(msg);
@@ -371,36 +353,31 @@ int main(int argc, char *argv[]) {
     listW = LINKEDLIST_create();
     listF = LINKEDLIST_create();
 
+    pthread_t thread_WorkerConnecter;
+    pthread_t thread_FleckConnecter;
+
     if (pthread_create(&thread_WorkerConnecter, NULL, funcThreadWorkerConnecter, NULL) != 0) {
-        write(STDOUT_FILENO, "Error: Cannot create WorkerConnecter thread\n", 44);
+        write(STDOUT_FILENO, "Error: Cannot create thread\n", 29);
         return 1;
     }
 
-    if (pthread_create(&thread_FleckConnecter, NULL, funcThreadFleckConnecter, NULL) != 0) {
-        write(STDOUT_FILENO, "Error: Cannot create FleckConnecter thread\n", 43);
+    if(pthread_create(&thread_FleckConnecter, NULL, funcThreadFleckConnecter, NULL) != 0) {
+        write(STDOUT_FILENO, "Error: Cannot create thread\n", 29);
         return 1;
     }
         
-    // Join the main listener threads
-    pthread_join(thread_WorkerConnecter, NULL);
-    pthread_join(thread_FleckConnecter, NULL);
-
-    // Join all Fleck threads
-    for (size_t i = 0; i < fleck_count; i++) {
-        pthread_join(fleck_threads[i], NULL);
+    if (pthread_join(thread_WorkerConnecter, NULL) != 0) {
+        write(STDOUT_FILENO, "Error: Cannot join thread\n", 27);
+        return 1; 
     }
 
-    // Join all Worker threads
-    for (size_t i = 0; i < worker_count; i++) {
-        pthread_join(worker_threads[i], NULL);
+    if (pthread_join(thread_FleckConnecter, NULL) != 0) {
+        write(STDOUT_FILENO, "Error: Cannot join thread\n", 27);
+        return 1; 
     }
-
-    doLogout();
-    close(fleck_connecter_fd);
-    close(worker_connecter_fd);
+    
     LINKEDLIST_destroy(&listF);
     LINKEDLIST_destroy(&listW);
     free_config();
-
     return 0;
 }

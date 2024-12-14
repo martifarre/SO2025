@@ -1,3 +1,6 @@
+#ifndef STRING_H
+#define STRING_H
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -26,5 +29,8 @@ void STRING_replace(char *old_str, char old, char new);
 char* STRING_getXFromMessage(const char* message, int x);
 char* STRING_extract_substring(char* global_cmd);
 void STRING_to_lowercase(char* str); 
+char* STRING_get_third_word(const char* input);
+char* STRING_getSongCode(const char* message, int length);
     
+#endif // STRING_H
 

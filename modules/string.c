@@ -213,3 +213,50 @@ void STRING_to_lowercase(char* str) {
         str[i] = tolower(str[i]);
     }
 }
+
+char* STRING_get_third_word(const char* input) {
+    if (!input) {
+        return NULL; // Si la entrada es NULL, devuelve NULL.
+    }
+
+    const char* delimiter = " "; // Delimitador para dividir las palabras.
+    char* copy = strdup(input); // Crear una copia de la cadena para no modificar la original.
+    if (!copy) {
+        perror("Failed to allocate memory");
+        return NULL;
+    }
+
+    char* token;
+    char* third_word = NULL;
+    int word_count = 0;
+
+    token = strtok(copy, delimiter);
+    while (token != NULL) {
+        word_count++;
+        if (word_count == 3) {
+            third_word = strdup(token); // Copiar la tercera palabra.
+            break;
+        }
+        token = strtok(NULL, delimiter);
+    }
+
+    free(copy); // Liberar la memoria de la copia.
+    return third_word; // Devuelve la tercera palabra o NULL si no hay tres palabras.
+}
+
+char* STRING_getSongCode(const char* message, int length) {
+    if (message == NULL || length <= 0) {
+        write(STDOUT_FILENO, "Error: Invalid message\n", 24);
+        return NULL;
+    }
+
+    char* songCode = (char*)malloc(sizeof(char) * (length + 1));
+    if (songCode == NULL) {
+        write(STDOUT_FILENO, "Error: Memory allocation failed\n", 32);
+        return NULL;
+    }
+
+    memcpy(songCode, message, length);
+    songCode[length] = '\0';
+    return songCode;
+}
