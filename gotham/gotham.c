@@ -18,7 +18,13 @@ GothamConfig config;
 LinkedList listW; 
 LinkedList listF;
 
+//arkham pipe and mutex
+int pipe_fds[2];
+pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 int fleck_connecter_fd = -1, worker_connecter_fd = -1;
+
+
 
 void free_config() {
     free(config.fleck_server_ip);
@@ -324,14 +330,61 @@ void doLogout() {
 
 void CTRLC(int signum) {
     print_text("\nInterrupt signal CTRL+C received\n");
+    close(pipe_fds[1]); // Close the write end of the pipe
     doLogout();
     close(fleck_connecter_fd);
     close(worker_connecter_fd);
     LINKEDLIST_destroy(&listF);
     LINKEDLIST_destroy(&listW);
     free_config();
+
+    wait(NULL);
+
     signal(SIGINT, SIG_DFL);
     raise(SIGINT);
+}
+
+
+
+// Signal handler for child process (Arkham)
+void signalHandlerArkham(int signum) {
+    close(pipe_fds[0]); // Close the read end of the pipe
+    exit(EXIT_SUCCESS);
+}
+
+// Function to write to the log file (used by Arkham process)
+void write_to_log(int pipe_fd) {
+    int log_fd = open("logs.txt", O_WRONLY | O_CREAT | O_APPEND, 0666);
+    if (log_fd < 0) {
+        perror("Error opening logs.txt");
+        exit(1);
+    }
+
+    char buffer[256];
+    ssize_t bytes_read;
+    while ((bytes_read = read(pipe_fd, buffer, sizeof(buffer) - 1)) > 0) {
+        buffer[bytes_read] = '\0'; // Null-terminate the string
+        write(log_fd, buffer, strlen(buffer));
+    }
+
+    close(log_fd);
+    close(pipe_fd);
+}
+
+// Function to log an event (used by Gotham process)
+void log_event(const char *event) {
+    char timestamped_event[256];
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+
+    // Format: "[YYYY-MM-DD HH:MM:SS] <event>\n"
+    snprintf(timestamped_event, sizeof(timestamped_event), "[%04d-%02d-%02d %02d:%02d:%02d] %s\n",
+             t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+             t->tm_hour, t->tm_min, t->tm_sec, event);
+
+    pthread_mutex_lock(&log_mutex);
+    write(pipe_fds[1], timestamped_event, strlen(timestamped_event));
+    pthread_mutex_unlock(&log_mutex);
 }
 
 int main(int argc, char *argv[]) {
@@ -343,41 +396,69 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, CTRLC);
 
     config = READCONFIG_read_config_gotham(argv[1]);
-
-    char *msg;
-
-    asprintf(&msg, "\nGotham server initialized.\nWaiting for connections...\n\n");
-    print_text(msg);
-    free(msg);
-
-    listW = LINKEDLIST_create();
-    listF = LINKEDLIST_create();
-
-    pthread_t thread_WorkerConnecter;
-    pthread_t thread_FleckConnecter;
-
-    if (pthread_create(&thread_WorkerConnecter, NULL, funcThreadWorkerConnecter, NULL) != 0) {
-        write(STDOUT_FILENO, "Error: Cannot create thread\n", 29);
-        return 1;
+    if (pipe(pipe_fds) == -1) {
+        perror("Error creating pipe");
+        exit(EXIT_FAILURE);
     }
 
-    if(pthread_create(&thread_FleckConnecter, NULL, funcThreadFleckConnecter, NULL) != 0) {
-        write(STDOUT_FILENO, "Error: Cannot create thread\n", 29);
-        return 1;
+    // Fork to create Arkham process
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("Error forking Arkham process");
+        exit(EXIT_FAILURE);
     }
+
+    if (pid == 0) {
+        // Child process: Arkham
+        signal(SIGINT, signalHandlerArkham);
+        close(pipe_fds[1]); // Close unused write end
+        write_to_log(pipe_fds[0]);
+        exit(EXIT_SUCCESS);
+    } else {
+        // Parent process: Gotham
+        close(pipe_fds[0]); // Close unused read end
+
+        char *msg;
+        asprintf(&msg, "\nGotham server initialized.\nWaiting for connections...\n\n");
+        print_text(msg);
+        free(msg);
+        //delte later
+        log_event("Harley connected: IP:172.16.205.3:9869");
+        listW = LINKEDLIST_create();
+        listF = LINKEDLIST_create();
+
+        pthread_t thread_WorkerConnecter;
+        pthread_t thread_FleckConnecter;
+
+        if (pthread_create(&thread_WorkerConnecter, NULL, funcThreadWorkerConnecter, NULL) != 0) {
+            write(STDOUT_FILENO, "Error: Cannot create thread\n", 29);
+            return 1;
+        }
+
+        if(pthread_create(&thread_FleckConnecter, NULL, funcThreadFleckConnecter, NULL) != 0) {
+            write(STDOUT_FILENO, "Error: Cannot create thread\n", 29);
+            return 1;
+        }
         
-    if (pthread_join(thread_WorkerConnecter, NULL) != 0) {
-        write(STDOUT_FILENO, "Error: Cannot join thread\n", 27);
-        return 1; 
+        //delte later, place where the log_event is called
+        log_event("Harley connected: IP:172.16.205.3:9869");
+        log_event("Fleck connected: username=arthur");
+        log_event("Harley connected: IP:172.16.205.3:9870");
+
+        if (pthread_join(thread_WorkerConnecter, NULL) != 0) {
+            write(STDOUT_FILENO, "Error: Cannot join thread\n", 27);
+            return 1; 
+        }
+
+        if (pthread_join(thread_FleckConnecter, NULL) != 0) {
+            write(STDOUT_FILENO, "Error: Cannot join thread\n", 27);
+            return 1; 
+        }
+        
+        LINKEDLIST_destroy(&listF);
+        LINKEDLIST_destroy(&listW);
+        free_config();
     }
 
-    if (pthread_join(thread_FleckConnecter, NULL) != 0) {
-        write(STDOUT_FILENO, "Error: Cannot join thread\n", 27);
-        return 1; 
-    }
-    
-    LINKEDLIST_destroy(&listF);
-    LINKEDLIST_destroy(&listW);
-    free_config();
     return 0;
 }
