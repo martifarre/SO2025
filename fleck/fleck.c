@@ -16,7 +16,7 @@
 FleckConfig config;
 // Variable global para almacenar el comando leído
 char *global_cmd = NULL;
-int sockfd_G = -1, sockfd_W = -1;
+int sockfd_G = -1, sockfd_E = -1, sockfd_H = -1;
 
 // Variable global para almacenar el estado de las distorsiones
 int ongoing_media_distortion = 0;
@@ -25,6 +25,16 @@ int ongoing_text_distortion = 0;
 int connected = 0;
 
 pthread_mutex_t myMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_t watcher_thread;
+
+LinkedList2 distortionsList; 
+
+typedef struct {
+    char* type;
+    char* filename;
+    char* factor;
+    listElement2* element;  // Elemento de la lista que será modificado
+} DistortionThreadParams;
 
 /***********************************************
 *
@@ -42,7 +52,7 @@ void free_config() {
 
 char *read_command(int *words) {
     int read_bytes;
-    print_text("\n$ ");
+    print_text("\n");
     STRING_read_line(STDIN_FILENO, &read_bytes, &global_cmd);
     global_cmd = STRING_to_upper_case(global_cmd);
     STRING_replace(global_cmd, '\n', '\0');
@@ -80,97 +90,124 @@ int connectToGotham() {
 }
 
 
-void realFileDistorsion (int sockfd, char* fileName, char* fileSize) {
-    char* path = (char*)malloc(sizeof(char) * (strlen(config.directory) + strlen(fileName) + 1));
-    sprintf(path, "%s/%s", config.directory, fileName);
+int realFileDistorsion(int sockfd, char* fileName, char* fileSize, listElement2* element) {
+    // Crear path del archivo
+    char* path = NULL;
+    if (asprintf(&path, "%s/%s", config.directory, fileName) == -1) return 1;
     write(STDOUT_FILENO, path, strlen(path));
+    char* fileSize2;
+    char* distortedMd5;
 
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
         write(STDOUT_FILENO, "Error: Cannot open file..\n", 27);
-        return;
+        free(path);
+        return 1;
     }
 
-    int bytes_written = 0;
+    if(element->status == 0) {
+        element->bytes_writtenF1 = 0;
+    }
+    element->status = 1;
+    strncpy(element->fileName, fileName, sizeof(element->fileName));
+
+
+
+
+
+    element->bytes_to_writeF1 = atoi(fileSize);
+
+
+    int bytes_written = element->bytes_writtenF1, bytes_to_write = atoi(fileSize);
     char* buf = (char*)malloc(sizeof(char) * 247);
     char* message = (char*)malloc(sizeof(char) * 256);
     struct trama ftrama;
     int sizeOfBuf = 0;
-    printf("File size: %d\n", atoi(fileSize));
-    while (atoi(fileSize) > bytes_written) {
-        memset(buf, '\0', 247);
-        memset(message, '\0', 256);
-        sizeOfBuf = read(fd, buf, 247); 
-        memcpy(message, buf, sizeOfBuf);
-        bytes_written += sizeOfBuf;       
-        pthread_mutex_lock(&myMutex);
-        TRAMA_sendMessageToSocket(sockfd, 0x03, sizeOfBuf, message);
-        pthread_mutex_unlock(&myMutex);
+    if(element->status == 0 || element->status == 1) {
+        while (bytes_to_write > bytes_written) {
+            memset(buf, '\0', 247);
+            memset(message, '\0', 256);
+            sizeOfBuf = read(fd, buf, 247);
+            memcpy(message, buf, sizeOfBuf);
+            bytes_written += sizeOfBuf;
+            element->bytes_writtenF1 = bytes_written;
+
+            pthread_mutex_lock(&myMutex);
+            TRAMA_sendMessageToSocket(sockfd, 0x03, sizeOfBuf, message);
+            pthread_mutex_unlock(&myMutex);
+        }
+        element->status = 2;
     }
     close(fd);
     free(buf);
 
-    printf("\nBytes to write: %d\n", atoi(fileSize));
-    printf("Bytes written: %d\n", bytes_written);
-    if(TRAMA_readMessageFromSocket(sockfd, &ftrama) < 0) {
-        write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
-        return;
-    } else if (ftrama.tipo == 0x06  && strcmp((const char *)ftrama.data, "CHECK_OK") == 0) {
-        write(STDOUT_FILENO, "File recieved in worker successfully. MD5sum came back OK.\n", 60);
-    } else if (ftrama.tipo == 0x06  && strcmp((const char *)ftrama.data, "CHECK_KO") == 0) {
-        write(STDOUT_FILENO, "Error: File could not be distorted.\n", 37);
-    } else {
-        write(STDOUT_FILENO, "Error: Invalid trama type.\n", 27);
-        free(ftrama.data);
-        return;
-    } 
-    free(ftrama.data);
+    if(element->status == 2) {
 
-    if(TRAMA_readMessageFromSocket(sockfd, &ftrama) < 0) {
-        write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
-        return;
-    } else if (ftrama.tipo != 0x04) {
-        write(STDOUT_FILENO, "Error: Invalid trama type.\n", 27);
+        if (TRAMA_readMessageFromSocket(sockfd, &ftrama) < 0) {
+            write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+            return 1;
+        } else if (ftrama.tipo == 0x06 && strcmp((const char *)ftrama.data, "CHECK_OK") == 0) {
+            write(STDOUT_FILENO, "File received in worker successfully. MD5sum came back OK.\n", 60);
+        } else if (ftrama.tipo == 0x06 && strcmp((const char *)ftrama.data, "CHECK_KO") == 0) {
+            write(STDOUT_FILENO, "Error: File could not be distorted.\n", 37);
+        } else if (ftrama.tipo == 0x07) {
+            write(STDOUT_FILENO, "Worker received a CTRL+C.\n", 26);
+            return 0;
+        } else {
+            write(STDOUT_FILENO, "Error: Invalid trama type.\n", 27);
+            free(ftrama.data);
+            return 1;
+        }
         free(ftrama.data);
-        return;
-    } 
-    char* fileSize2 = STRING_getXFromMessage((const char *)ftrama.data, 0);
-    char* distortedMd5 = STRING_getXFromMessage((const char *)ftrama.data, 1);
-    printf("File size distorted: %s\n", fileSize2);
-    printf("distortedMD5: %s\n", distortedMd5);
 
-    free(ftrama.data);
-    
-    char* path2 = (char*)malloc(sizeof(char) * (strlen(config.directory) + strlen(fileName) + strlen(".//D")));
-    sprintf(path2, "./%s/%sD", config.directory, fileName);
+        if (TRAMA_readMessageFromSocket(sockfd, &ftrama) < 0) {
+            write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+            return 1;
+        } else if (ftrama.tipo != 0x04) {
+            write(STDOUT_FILENO, "Error: Invalid trama type.\n", 27);
+            free(ftrama.data);
+            return 1;
+        } else if (ftrama.tipo == 0x07) {
+            write(STDOUT_FILENO, "Worker received a CTRL+C.\n", 26);
+            return 0;
+        }
+        fileSize2 = STRING_getXFromMessage((const char *)ftrama.data, 0);
+        distortedMd5 = STRING_getXFromMessage((const char *)ftrama.data, 1);
+
+        free(ftrama.data);
+    }
+
+    char* path2 = NULL;
+    if (asprintf(&path2, "%s/%sD", config.directory, fileName) == -1) return 1;
 
     int fd2 = open(path2, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fd2 < 0) {
         perror("Failed to open file.");
         exit(EXIT_FAILURE);
     }
-    printf("Path2: %s\n", path2);
 
-    int bytes_written2 = 0, bytes_to_write = atoi(fileSize2);
-    int i = 0;   
-    while (bytes_written2 < bytes_to_write) {
-        if(TRAMA_readMessageFromSocket(sockfd, &ftrama) < 0) {
+    int bytes_written2 = 0, bytes_to_write2 = atoi(fileSize2);
+
+    element->status = 3;
+    element->bytes_to_writeF2 = bytes_to_write2;
+    while (bytes_written2 < bytes_to_write2) {
+        if (TRAMA_readMessageFromSocket(sockfd, &ftrama) < 0) {
             write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
-            return;
+            return 1;
         } else if (ftrama.tipo == 0x07) {
-            write(STDOUT_FILENO, "Fleck received a CTRL+C.\n", 26);
-            return;
+            write(STDOUT_FILENO, "Worker received a CTRL+C.\n", 26);
+            return 0;
         } else if (ftrama.tipo != 0x05) {
             write(STDOUT_FILENO, "Error: Invalid trama type.\n", 27);
-            return;
+            return 1;
         }
         char* incoming_Info = NULL;
-        if (bytes_to_write - bytes_written2 < 247) {
-            incoming_Info = STRING_getSongCode((const char *)ftrama.data, bytes_to_write - bytes_written2);
-            bytes_written2 += write(fd2, incoming_Info, bytes_to_write - bytes_written2);
+        if (bytes_to_write2 - bytes_written2 < 247) {
+            incoming_Info = STRING_getSongCode((const char *)ftrama.data, bytes_to_write2 - bytes_written2);
+            bytes_written2 += write(fd2, incoming_Info, bytes_to_write2 - bytes_written2);
         } else {
             incoming_Info = STRING_getSongCode((const char *)ftrama.data, 247);
-            bytes_written2 += write(fd, incoming_Info, 247);
+            bytes_written2 += write(fd2, incoming_Info, 247);
         }
         if (bytes_written2 < 0) {
             perror("Failed to write to file.");
@@ -178,19 +215,16 @@ void realFileDistorsion (int sockfd, char* fileName, char* fileSize) {
         }
         free(incoming_Info);
         free(ftrama.data);
-        i++;
+        element->bytes_writtenF2 = bytes_written2;
     }
-    printf("Value of i: %d\n", i);
     char* actualMd5 = DISTORSION_getMD5SUM(path2);
-    printf("Actual MD5: %s\n", actualMd5);
-    printf("Bytes to write: %d\n", atoi(fileSize2));
-    printf("Bytes written: %d\n", bytes_written2);
 
-    if(strcmp(distortedMd5, actualMd5) == 0) {
-        TRAMA_sendMessageToSocket(sockfd, 0x06, (int16_t)strlen("CHECK_OK"), "CHECK_OK");  
+    if (strcmp(distortedMd5, actualMd5) == 0) {
+        TRAMA_sendMessageToSocket(sockfd, 0x06, (int16_t)strlen("CHECK_OK"), "CHECK_OK");
+        write(STDOUT_FILENO, "File distorted successfully.\n", 30);
     } else {
-        TRAMA_sendMessageToSocket(sockfd, 0x06, (int16_t)strlen("CHECK_KO"), "CHECK_KO");  
-        return;
+        TRAMA_sendMessageToSocket(sockfd, 0x06, (int16_t)strlen("CHECK_KO"), "CHECK_KO");
+        write(STDOUT_FILENO, "Error: File could not be distorted.\n", 37);
     }
 
     remove(path2);
@@ -200,6 +234,9 @@ void realFileDistorsion (int sockfd, char* fileName, char* fileSize) {
     free(fileSize2);
     free(actualMd5);
     free(distortedMd5);
+
+    element->status = 4;
+    return 1;
 }
 
 void sendSongInfo(int sockfd, char* filename, char* factor, char* fileSize, char* path) {
@@ -212,8 +249,8 @@ void sendSongInfo(int sockfd, char* filename, char* factor, char* fileSize, char
         dup2(fds[1], STDOUT_FILENO);
         close(fds[1]);
 
-        char *cmd = (char *)malloc(sizeof(char) * (strlen("md5sum ") + strlen(path) + 1));
-        sprintf(cmd, "md5sum %s", path);
+        char *cmd = NULL;
+        asprintf(&cmd, "md5sum %s", path);
         
         execlp("/bin/sh", "sh", "-c", cmd, NULL);
         exit(EXIT_FAILURE);
@@ -227,15 +264,13 @@ void sendSongInfo(int sockfd, char* filename, char* factor, char* fileSize, char
 
         close(fds[0]);
         char* data = (char*)malloc(256 * sizeof(char));
-        printf("MD5: %s\n", actualMd5);
-        printf("File size: %s\n", fileSize);
         sprintf(data, "%s&%s&%s&%s&%s", config.username, filename, fileSize, actualMd5, factor);
         TRAMA_sendMessageToSocket(sockfd, 0x03, (int16_t)strlen(data), data);
         free(data);
     }
 }
 
-void distortFile (char* type, char* filename, char* factor) {
+void distortFile (char* type, char* filename, char* factor, listElement2* element) {
     if (strcmp(type, "Media") == 0) {
         if (ongoing_media_distortion) {
             write(STDOUT_FILENO, "A media distortion is already in progress.\n", 44);
@@ -253,55 +288,69 @@ void distortFile (char* type, char* filename, char* factor) {
             ongoing_text_distortion = 1; 
         }
     }
-
-    char* data = (char*)malloc(256 * sizeof(char));
-
-    sprintf(data, "%s&%s", type, filename);
+    char* data = NULL;
+    printf("Filename: %s\n", filename);
+    if (asprintf(&data, "%s&%s", type, filename) == -1) return;
     TRAMA_sendMessageToSocket(sockfd_G, 0x10, (int16_t)strlen(data), data);
     free(data);
 
     struct trama ftrama;
-    if(TRAMA_readMessageFromSocket(sockfd_G, &ftrama) < 0) {
-        write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
-        return;
-    }
-    if(strcmp((const char *)ftrama.data, "DISTORT_KO") == 0) {
-        write(STDOUT_FILENO, "ERROR: No worker for this type available.\n", 43);
-        free(ftrama.data);
-    } else {
-        char *port = STRING_getXFromMessage((const char *)ftrama.data, 1);
-        char *ip = STRING_getXFromMessage((const char *)ftrama.data, 0);
-        sockfd_W = SOCKET_createSocket(port, ip);
-        free(ftrama.data);  
-        char* path = (char*)malloc(sizeof(char) * (strlen(config.directory) + strlen(filename) + 1));
-        sprintf(path, "%s/%s", config.directory, filename);
-        write(STDOUT_FILENO, path, strlen(path));
-        char* fileSize = FILES_get_size_of_file(path);
-        sendSongInfo(sockfd_W, filename, factor, fileSize, path);
-        if(TRAMA_readMessageFromSocket(sockfd_W, &ftrama) < 0) {
+    while (1) {
+        if(TRAMA_readMessageFromSocket(sockfd_G, &ftrama) < 0) {
             write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
             return;
         }
-        if(strcmp((const char *)ftrama.data, "CON_KO") == 0) {
-            write(STDOUT_FILENO, "ERROR: File could not be distorted\n", 36);
+        if(strcmp((const char *)ftrama.data, "DISTORT_KO") == 0) {
+            write(STDOUT_FILENO, "ERROR: No worker for this type available.\n", 43);
+            free(ftrama.data);
         } else {
-            if(ftrama.tipo == 0x03) {
-                write(STDOUT_FILENO, "File starting to distort.\n", 27);
-                realFileDistorsion(sockfd_W, filename, fileSize);
+            char *port = STRING_getXFromMessage((const char *)ftrama.data, 1);
+            char *ip = STRING_getXFromMessage((const char *)ftrama.data, 0);
+            int s_fd = -1;
+            s_fd = SOCKET_createSocket(port, ip);
+            if(strcmp (type, "Media") == 0) {
+                sockfd_H = s_fd;
+            } else if(strcmp (type, "Text") == 0) {
+                sockfd_E = s_fd;
+            }
+            free(ftrama.data);  
+            char* path = NULL;
+            if (asprintf(&path, "%s/%s", config.directory, filename) == -1) return;
+            write(STDOUT_FILENO, path, strlen(path));
+
+            char* fileSize = FILES_get_size_of_file(path);
+            sendSongInfo(s_fd, filename, factor, fileSize, path);
+            free(path);
+            if(TRAMA_readMessageFromSocket(s_fd, &ftrama) < 0) {
+                write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+                return;
+            }
+            if(strcmp((const char *)ftrama.data, "CON_KO") == 0) {
+                write(STDOUT_FILENO, "ERROR: File could not be distorted\n", 36);
+            } else {
+                if(ftrama.tipo == 0x03) {
+                    write(STDOUT_FILENO, "File starting to distort.\n", 27);
+                    if(realFileDistorsion(s_fd, filename, fileSize, element) == 0) {
+                        char* data2 = NULL;
+                        if (asprintf(&data2, "%s&%s", type, filename) == -1) return;
+                        TRAMA_sendMessageToSocket(sockfd_G, 0x10, (int16_t)strlen(data2), data2);
+                        free(data2);
+                    }
+                }
+            }
+            free(ftrama.data);
+            free(port);
+            free(ip);
+            close(s_fd);
+            s_fd = -1;
+            if(strcmp (type, "Media") == 0) {
+                sockfd_H = s_fd;
+                ongoing_media_distortion = 0;
+            } else if(strcmp (type, "Text") == 0) {
+                sockfd_E = s_fd;
+                ongoing_text_distortion = 0;
             }
         }
-        free(ftrama.data);
-        free(port);
-        free(ip);
-        close(sockfd_W);
-        sockfd_W = -1;
-    }
-
-    // Reset 
-    if (strcmp(type, "Media") == 0) {
-        ongoing_media_distortion = 0;
-    } else if (strcmp(type, "Text") == 0) {
-        ongoing_text_distortion = 0;
     }
 }
 
@@ -313,10 +362,15 @@ void doLogout () {
         sockfd_G = -1;
         write(STDOUT_FILENO, "Sending logout message to Gotham server...\n", 43);
     }
-    if (SOCKET_isSocketOpen(sockfd_W)) {
+    if (SOCKET_isSocketOpen(sockfd_H)) {
         write(STDOUT_FILENO, "Sending logout message to Worker server...\n", 43);
-        TRAMA_sendMessageToSocket(sockfd_W, 0x07, (int16_t)strlen("CON_KO"), "CON_KO"); 
-        close(sockfd_W);
+        TRAMA_sendMessageToSocket(sockfd_H, 0x07, (int16_t)strlen("CON_KO"), "CON_KO"); 
+        close(sockfd_H);
+    }
+    if(SOCKET_isSocketOpen(sockfd_E)) {
+        write(STDOUT_FILENO, "Sending logout message to Worker server...\n", 43);
+        TRAMA_sendMessageToSocket(sockfd_E, 0x07, (int16_t)strlen("CON_KO"), "CON_KO"); 
+        close(sockfd_E);
     }
 }
 
@@ -328,6 +382,9 @@ void CTRLC(int signum) {
         global_cmd = NULL;
     }
     free_config();
+    LINKEDLIST2_destroy(&distortionsList);
+    pthread_cancel(watcher_thread);
+    pthread_join(watcher_thread, NULL);
     signal(SIGINT, SIG_DFL);
     raise(SIGINT);
 }
@@ -339,7 +396,7 @@ void *connection_watcher() {
             connected = 0;
             close(sockfd_G);
             while(1) {
-                if(!SOCKET_isSocketOpen(sockfd_W)) {
+                if(!SOCKET_isSocketOpen(sockfd_E) || !SOCKET_isSocketOpen(sockfd_H)) {
                     CTRLC(0);
                 }
             }
@@ -349,6 +406,84 @@ void *connection_watcher() {
     return NULL;
 }
 
+void CHECK_STATUS() {
+    if (LINKEDLIST2_isEmpty(distortionsList)) {
+        write(STDOUT_FILENO, "No distortions in progress.\n", 28);
+        return;
+    }
+
+    write(STDOUT_FILENO, "Distortion Status:\n", strlen("Distortion Status:\n"));
+
+    char buffer[256];
+
+    LINKEDLIST2_goToHead(distortionsList);
+    while (!LINKEDLIST2_isAtEnd(distortionsList)) {
+        listElement2* element = LINKEDLIST2_get(distortionsList);
+
+        snprintf(buffer, sizeof(buffer), "File: %.248s\n", element->fileName);
+        write(STDOUT_FILENO, buffer, strlen(buffer));
+
+        float progress = 0.0;
+
+        if (element->status == 0) {  // Inicialización
+            write(STDOUT_FILENO, "Status: Initialization\n", strlen("Status: Initialization\n"));
+        } else if (element->status == 1) {  // Fase de envío (0 - 50%)
+            progress = ((float)element->bytes_writtenF1 / element->bytes_to_writeF1) * 50;
+            snprintf(buffer, sizeof(buffer), "Status: (%.2f%%)\n", progress);
+            write(STDOUT_FILENO, buffer, strlen(buffer));
+        } else if (element->status == 2) {
+            progress = 50;
+            snprintf(buffer, sizeof(buffer), "Status: (%.2f%%)\n", progress);
+            write(STDOUT_FILENO, buffer, strlen(buffer));
+        } else if (element->status == 3) {  // Fase de distorsión (50 - 100%)
+            progress = 50 + ((float)element->bytes_writtenF2 / element->bytes_to_writeF2) * 50;
+            snprintf(buffer, sizeof(buffer), "Status: (%.2f%%)\n", progress);
+            write(STDOUT_FILENO, buffer, strlen(buffer));
+        } else if (element->status == 4) {  // Completado
+            write(STDOUT_FILENO, "Status: Completed\n", strlen("Status: Completed\n"));
+        }
+
+        // Pasar al siguiente elemento en la LinkedList
+        LINKEDLIST2_next(distortionsList);
+    }
+}
+
+
+void CLEAR_ALL() {
+    if (LINKEDLIST2_isEmpty(distortionsList)) {
+        write(STDOUT_FILENO, "No distortions in the list.\n", 28);
+        return;
+    }
+
+    int found = 0;  
+
+    LINKEDLIST2_goToHead(distortionsList);
+
+    while (!LINKEDLIST2_isAtEnd(distortionsList)) {
+        listElement2* element = LINKEDLIST2_get(distortionsList);
+
+        if (element->status == 4) { 
+            LINKEDLIST2_remove(distortionsList);
+            found = 1; 
+        } else {
+            LINKEDLIST2_next(distortionsList);
+        }
+    }
+
+    if (!found) {
+        write(STDOUT_FILENO, "No completed distortions to clear.\n", 36);
+    } else {
+        write(STDOUT_FILENO, "All completed distortions cleared.\n", 36);
+    }
+}
+
+void* distortFileThread(void* arg) {
+    DistortionThreadParams* params = (DistortionThreadParams*)arg;
+    distortFile(params->type, params->filename, params->factor, params->element);
+
+    free(params);
+    return NULL;
+}
 
 void terminal() {
     int words;
@@ -362,7 +497,6 @@ void terminal() {
             } else {
                 if(connectToGotham()) {
                     connected = 1;
-                    pthread_t watcher_thread;
                     if(pthread_create(&watcher_thread, NULL, connection_watcher, NULL) != 0) {
                         write(STDOUT_FILENO, "Error: Cannot create thread\n", 29);
                     } else {
@@ -375,27 +509,69 @@ void terminal() {
         } else if (strcmp(global_cmd, "LIST TEXT") == 0) {
             FILES_list_files(config.directory, "text files");
         } else if (strncmp(global_cmd, "DISTORT", 7) == 0 && words == 3) {
-            if(!connected) {
+            if (!connected) {
                 write(STDOUT_FILENO, "Not connected\n", 15);
             } else {
                 char* extracted = STRING_extract_substring(global_cmd);
                 STRING_to_lowercase(extracted);
                 char* type = FILES_file_exists_with_type(config.directory, extracted);
                 char* factor = STRING_get_third_word(global_cmd);
-                if(strcmp(type, "Neither") == 0) {  
+
+                if (strcmp(type, "Neither") == 0) {
                     write(STDOUT_FILENO, "File not found\n", 15);
                 } else {
                     write(STDOUT_FILENO, "File exists.\n", 14);
-                    distortFile(type, extracted, factor);
+
+                    //  Crear el nuevo elemento y agregarlo a la LinkedList ANTES de lanzar el hilo
+                    listElement2* newElement = (listElement2*)malloc(sizeof(listElement2));
+                    if (newElement == NULL) {
+                        write(STDOUT_FILENO, "Error: Memory allocation failed for listElement.\n", 50);
+                        return;
+                    }
+
+                    // Inicializar el nuevo elemento
+                    strncpy(newElement->fileName, extracted, sizeof(newElement->fileName));
+                    newElement->status = 0;
+                    newElement->bytes_writtenF1 = 0;
+                    newElement->bytes_writtenF2 = 0;
+
+                    // Agregarlo a la LinkedList
+                    LINKEDLIST2_add(distortionsList, newElement);
+
+                    // Preparar los parámetros del hilo
+                    DistortionThreadParams* params = (DistortionThreadParams*)malloc(sizeof(DistortionThreadParams));
+                    params->type = type;
+                    params->filename = extracted;
+                    params->factor = factor;
+                    params->element = newElement;  // Pasamos el puntero del nuevo elemento
+
+                    // Crear el hilo que ejecutará `distortFileThread`
+                    pthread_t thread_id;
+                    if(pthread_create(&thread_id, NULL, distortFileThread, params) < 0) {
+                        write(STDOUT_FILENO, "Error: Cannot create thread\n", 29);
+                    } else {
+                        pthread_detach(thread_id);
+                    }
                 }
-                if (extracted != NULL) {
-                    free(extracted);
-                }
+                free(extracted);
+                extracted = NULL;
+                free(type);
+                type = NULL;
+                free(factor);
+                factor = NULL;
             }
         } else if (strcmp(global_cmd, "CHECK STATUS") == 0) {
-            write(STDOUT_FILENO, "Command OK. Command not ready yet\n", 35);
+            if (!connected) {
+                write(STDOUT_FILENO, "Not connected\n", 15);
+            } else {
+                CHECK_STATUS();
+            }
         } else if (strcmp(global_cmd, "CLEAR ALL") == 0) {
-            write(STDOUT_FILENO, "Command OK. Command not ready yet\n", 35);
+            if (!connected) {
+                write(STDOUT_FILENO, "Not connected\n", 15);
+            } else {
+                CLEAR_ALL();
+            }
         } else if (strcmp(global_cmd, "LOGOUT") == 0) {
             write(STDOUT_FILENO, "Command OK. Bye bye.\n", 22);
             free(global_cmd);
@@ -426,6 +602,8 @@ int main(int argc, char *argv[]) {
     
     config = READCONFIG_read_config_fleck(argv[1]);
 
+    distortionsList = LINKEDLIST2_create();
+
     char* msg;
 
     asprintf(&msg, "\n%s user initialized\n", config.username);
@@ -435,6 +613,6 @@ int main(int argc, char *argv[]) {
     terminal();
 
     free_config();
-
+    LINKEDLIST2_destroy(&distortionsList);
     return 0;
 }

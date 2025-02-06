@@ -3,7 +3,7 @@
 
 /***********************************************
 *
-* @Proposit: LINKEDLIST 1: Para los Poole (.h)
+* @Proposit: LINKEDLIST 2: Para los Poole (.h)
 * @Autor/s: Ignacio Giral, Llorenç Salvà (ignacio.giral, llorenc.salva)
 * @Data creacio: 21/11/2023
 * @Data ultima modificacio: 21/06/2024
@@ -12,8 +12,8 @@
 
 // Define guard to prevent compilation problems if we add the module more
 //  than once in the project.
-#ifndef LINKEDLIST_H
-#define LINKEDLIST_H
+#ifndef LINKEDLIST2_H
+#define LINKEDLIST2_H
 
 #include <stdlib.h>
 #include <time.h>
@@ -25,20 +25,28 @@
 #define LIST_ERROR_MALLOC 3			// Error, a malloc failed.
 #define LIST_ERROR_END 4			// Error, the POV is at the end.
 
-typedef struct{
-    int sockfd;
-    char* ip;
-    char* port;
-    char* worker_type;
-    char* fleck_username;
-    int principal;
-} listElement;
+typedef struct {
+    long message_type;
+    char fileName[256];
+    char *username;
+    char *worker_type;
+    char* factor;
+    int bytes_writtenF1;
+    int bytes_to_writeF1;
+    int bytes_writtenF2;
+    int bytes_to_writeF2;
+    int fd;
+    char* MD5SUM;
+    char *directory;
+    pthread_t thread_id;
+    int status; //0: No empezada, 1: Transfiriendo1 , 2: Distorsionando, 3: Transfiriendo2, 4: Completada
+} listElement2;
 
 
 // Data types
-typedef listElement* Element;
+typedef listElement2* Element2;
 
-typedef struct list_t* LinkedList;
+typedef struct list_t* LinkedList2;
 
 // Procedures & Functions
 
@@ -52,7 +60,7 @@ typedef struct list_t* LinkedList;
  * @Return: An empty linked list
  *
  ****************************************************************************/
-LinkedList LINKEDLIST_create ();
+LinkedList2 LINKEDLIST2_create ();
 
 
 /**************************************************************************** 
@@ -68,7 +76,7 @@ LinkedList LINKEDLIST_create ();
  * @Return: ---
  *
  ****************************************************************************/
-void 	LINKEDLIST_add (LinkedList list, Element element);
+void 	LINKEDLIST2_add (LinkedList2 list, Element2 element);
 
 
 /**************************************************************************** 
@@ -84,7 +92,7 @@ void 	LINKEDLIST_add (LinkedList list, Element element);
  * @Return: ---
  *
  ****************************************************************************/
-void 	LINKEDLIST_remove (LinkedList list);
+void 	LINKEDLIST2_remove (LinkedList2 list);
 
 
 /**************************************************************************** 
@@ -100,7 +108,7 @@ void 	LINKEDLIST_remove (LinkedList list);
  * @Return: ---
  *
  ****************************************************************************/
-Element LINKEDLIST_get (LinkedList list);
+Element2 LINKEDLIST2_get (LinkedList2 list);
 
 
 /**************************************************************************** 
@@ -111,7 +119,7 @@ Element LINKEDLIST_get (LinkedList list);
  * @Return: true (!0) if this list contains no elements, false (0) otherwise
  *
  ****************************************************************************/
-int 	LINKEDLIST_isEmpty (LinkedList list);
+int 	LINKEDLIST2_isEmpty (LinkedList2 list);
 
 
 /**************************************************************************** 
@@ -122,7 +130,7 @@ int 	LINKEDLIST_isEmpty (LinkedList list);
  * @Return: ---
  *
  ****************************************************************************/
-void 	LINKEDLIST_goToHead (LinkedList list);
+void 	LINKEDLIST2_goToHead (LinkedList2 list);
 
 
 /**************************************************************************** 
@@ -136,7 +144,7 @@ void 	LINKEDLIST_goToHead (LinkedList list);
  * @Return: ---
  *
  ****************************************************************************/
-void 	LINKEDLIST_next (LinkedList list);
+void 	LINKEDLIST2_next (LinkedList2 list);
 
 
 /**************************************************************************** 
@@ -148,12 +156,12 @@ void 	LINKEDLIST_next (LinkedList list);
  * @Return: true (!0) if the POV is after the last element in the list
  *
  ****************************************************************************/
-int 	LINKEDLIST_isAtEnd (LinkedList list);
+int 	LINKEDLIST2_isAtEnd (LinkedList2 list);
 
 
 //dos nuevas funciones
-void LINKEDLIST_clear(LinkedList list);
-void LINKEDLIST_shuffle(LinkedList list);
+void LINKEDLIST2_clear(LinkedList2 list);
+void LINKEDLIST2_shuffle(LinkedList2 list);
 
 
 
@@ -168,7 +176,7 @@ void LINKEDLIST_shuffle(LinkedList list);
  * @Return: ---
  *
  ****************************************************************************/
-void 	LINKEDLIST_destroy (LinkedList* list);
+void 	LINKEDLIST2_destroy (LinkedList2* list);
 
 
 /**************************************************************************** 
@@ -181,7 +189,7 @@ void 	LINKEDLIST_destroy (LinkedList* list);
  * @Return: an error code from the list of constants defined.
  *
  ****************************************************************************/
-int		LINKEDLIST_getErrorCode (LinkedList list);
+int		LINKEDLIST2_getErrorCode (LinkedList2 list);
 
 
 #endif

@@ -11,8 +11,8 @@ char* DISTORSION_getMD5SUM(const char* path) {
         dup2(fds[1], STDOUT_FILENO);
         close(fds[1]);
 
-        char *cmd = (char *)malloc(sizeof(char) * (strlen("md5sum ") + strlen(path) + 1));
-        sprintf(cmd, "md5sum %s", path);
+        char *cmd = NULL;
+        asprintf(&cmd, "md5sum %s", path);
         
         execlp("/bin/sh", "sh", "-c", cmd, NULL);
         exit(EXIT_FAILURE);
@@ -76,30 +76,30 @@ int DISTORSION_compressText(char *input_file_path, int word_limit) {
     size_t word_length = 0;
     char *start = buffer;
 
-    for (size_t i = 0; i <= file_size; i++) {
+    for (size_t i = 0; i < file_size; i++) {  // Aquí está la corrección
         if (isalpha(buffer[i])) {
-            // Contar la longitud de la palabra
             word_length++;
         } else {
-            // Si encontramos un delimitador o fin de palabra
             if (word_length >= (size_t)word_limit) {
-                // Copia la palabra completa, incluyendo los caracteres no alfabéticos
-                while (start <= &buffer[i]) {
+                while (start <= &buffer[i] && filtered_index < file_size) {
                     filtered_text[filtered_index++] = *start++;
                 }
             } else {
-                // Ignorar la palabra actual, pero copiar los delimitadores
-                while (!isalpha(*start) && start <= &buffer[i]) {
+                while (!isalpha(*start) && start <= &buffer[i] && filtered_index < file_size) {
                     filtered_text[filtered_index++] = *start++;
                 }
                 start = &buffer[i + 1];
             }
-            word_length = 0; // Reiniciar el contador de la palabra
+            word_length = 0;
         }
     }
 
-    filtered_text[filtered_index] = '\0'; // Termina la cadena
-
+    // Asegurar terminador nulo en `filtered_text`
+    if (filtered_index < file_size) {
+        filtered_text[filtered_index] = '\0';
+    } else {
+        filtered_text[file_size - 1] = '\0';
+    }
     // Sobrescribe el archivo con el texto filtrado
     rewind(file);
     if (fwrite(filtered_text, 1, filtered_index, file) != filtered_index) {
@@ -118,157 +118,177 @@ int DISTORSION_compressText(char *input_file_path, int word_limit) {
         return ERROR_WRITING_FILE;
     }
 
+
     // Limpieza
     free(buffer);
     free(filtered_text);
     fclose(file);
+    
 
     return NO_ERROR; // Todo salió bien
 }
 
 
-void DISTORSION_distortFile(int fleckSock, char* directory, char* MD5SUM, char* factor, char* fileSize, char* fileName, char* worker_type) {
-    pthread_mutex_t harleyMutex = PTHREAD_MUTEX_INITIALIZER;
-    char* path = (char*)malloc(sizeof(char) * (strlen(directory) + strlen(fileName) + 1));
-    sprintf(path, "%s/%s",directory, fileName);
+int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_signal) {
+    pthread_mutex_t myMutex = PTHREAD_MUTEX_INITIALIZER;
+    char* path = NULL;
+    asprintf(&path, "%s/%s", element->directory, element->fileName);
     write(STDOUT_FILENO, path, strlen(path));
+    char* fileSize3;
+    char* actualMd5;
+    char* fileSize2;
 
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fd < 0) {
         perror("Failed to open file.");
         exit(EXIT_FAILURE);
     }
+
     struct trama htrama;
-    printf("File size: %d\n", atoi(fileSize));
-    int bytes_written = 0, bytes_to_write = atoi(fileSize), i = 0;   
-    while (bytes_written < bytes_to_write) {
-        if(TRAMA_readMessageFromSocket(fleckSock, &htrama) < 0) {
-            write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
-            return;
-        } else if (htrama.tipo == 0x07) {
-            write(STDOUT_FILENO, "Fleck received a CTRL+C.\n", 26);
-            return;
-        } else if (htrama.tipo != 0x03) {
-            write(STDOUT_FILENO, "Error: Invalid trama type.\n", 27);
-            return;
+    int bytes_written = 0, bytes_to_write = element->bytes_to_writeF1; 
+    if(element->status == 0 || element->status == 1) {
+        element->status = 1;
+        while (bytes_written < bytes_to_write) {
+            if (*stop_signal) {  
+                write(STDOUT_FILENO, "Stopping file reception due to signal...\n", 42);
+                close(fd);
+                return 1;
+            }
+            if(TRAMA_readMessageFromSocket(element->fd, &htrama) < 0) {
+                write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+                return 1;
+            } else if (htrama.tipo == 0x07) {
+                write(STDOUT_FILENO, "Fleck received a CTRL+C.\n", 26);
+                return 1;
+            } else if (htrama.tipo != 0x03) {
+                write(STDOUT_FILENO, "Error: Invalid trama type.\n", 28);
+                return 1;
+            }
+            char* incoming_Info = NULL;
+            if (bytes_to_write - bytes_written < 247) {
+                incoming_Info = STRING_getSongCode((const char *)htrama.data, bytes_to_write - bytes_written);
+                bytes_written += write(fd, incoming_Info, bytes_to_write - bytes_written);
+            } else {
+                incoming_Info = STRING_getSongCode((const char *)htrama.data, 247);
+                bytes_written += write(fd, incoming_Info, 247);
+            }
+            if (bytes_written < 0) {
+                perror("Failed to write to file.");
+                exit(EXIT_FAILURE);
+            }
+            free(incoming_Info);
+            element->bytes_writtenF1 = bytes_written;
         }
-        char* incoming_Info = NULL;
-        if (bytes_to_write - bytes_written < 247) {
-            incoming_Info = STRING_getSongCode((const char *)htrama.data, bytes_to_write - bytes_written);
-            bytes_written += write(fd, incoming_Info, bytes_to_write - bytes_written);
-        } else {
-            incoming_Info = STRING_getSongCode((const char *)htrama.data, 247);
-            bytes_written += write(fd, incoming_Info, 247);
-        }
-        if (bytes_written < 0) {
-            perror("Failed to write to file.");
-            exit(EXIT_FAILURE);
-        }
-        free(incoming_Info);
         free(htrama.data);
-        i++;
-        printf("Value of i: %d\n", i);
-    }
-    printf("Value of i: %d\n", i);  
-     
+        element->status = 2;
+    } 
     close(fd);
     
-    printf("MD5: %s\n", MD5SUM);
-    printf("File size: %s\n", fileSize);
-    printf("Bytes to write: %d\n", bytes_to_write);
-    printf("Bytes written: %d\n", bytes_written);
+    if(element->status == 2) {
 
-    char* actualMd5 = DISTORSION_getMD5SUM(path);
-    char* fileSize2 = FILES_get_size_of_file(path);
-    printf("FileSize2: %s\n", fileSize2);
-    printf("Actual MD5: %s\n", actualMd5);
-    if(strcmp(MD5SUM, actualMd5) == 0) {
-        TRAMA_sendMessageToSocket(fleckSock, 0x06, (int16_t)strlen("CHECK_OK"), "CHECK_OK");  
-    } else {
-        TRAMA_sendMessageToSocket(fleckSock, 0x06, (int16_t)strlen("CHECK_KO"), "CHECK_KO");  
-        return;
+        actualMd5 = DISTORSION_getMD5SUM(path);
+        fileSize2 = FILES_get_size_of_file(path);
+
+        if(strcmp(element->MD5SUM, actualMd5) == 0) {
+            TRAMA_sendMessageToSocket(element->fd, 0x06, (int16_t)strlen("CHECK_OK"), "CHECK_OK");  
+        } else {
+            TRAMA_sendMessageToSocket(element->fd, 0x06, (int16_t)strlen("CHECK_KO"), "CHECK_KO");  
+            return 1;
+        }
+
+        int error = 0;
+        if(strcmp(element->worker_type, "Text") == 0) {
+            error = DISTORSION_compressText(path, atoi(element->factor));
+        } else if(FILES_has_extension(element->fileName, (const char *[]) { ".wav", NULL })) {
+            write(STDOUT_FILENO, "Compressing audio file\n", 24);
+
+            error = SO_compressAudio(path, atoi(element->factor));
+            write(STDOUT_FILENO, "Audio file compressed\n", 23);
+        } else {
+            error = SO_compressImage(path, atoi(element->factor));
+        }
+
+        write(STDOUT_FILENO, "Out\n", 4);
+        switch (error) {
+            case 0:
+                write(STDOUT_FILENO, "The file was distorted successfully\n", 37);
+                break;
+            case -1:
+                write(STDOUT_FILENO, "The file could not be read\n", strlen("The file could not be read\n"));
+                return 1;
+            case -2:
+                write(STDOUT_FILENO, "The scaling factor is too large for the file\n", strlen("The scaling factor is too large for the file\n"));
+                return 1;
+            case -3:
+                write(STDOUT_FILENO, "Memory allocation error\n", 25);
+                return 1;
+            case -4:
+                write(STDOUT_FILENO, "Error creating the temporary file\n", 35);
+                return 1;
+            case -5:
+                write(STDOUT_FILENO, "Unsupported image format\n", 26);
+                return 1;
+            case -6:
+                write(STDOUT_FILENO, "Error creating the final file\n", 31);
+                return 1;
+            case -7:
+                write(STDOUT_FILENO, "The audio file is not a WAV file. Only WAV files are supported\n", 63);
+                return 1;
+            default:
+                break;
+        }
+        fileSize3 = FILES_get_size_of_file(path);
+        char* distortedMd5 = DISTORSION_getMD5SUM(path);
+
+        char* data = (char*)malloc(256 * sizeof(char));
+        sprintf(data, "%s&%s", fileSize3, distortedMd5);
+        TRAMA_sendMessageToSocket(element->fd, 0x04, (int16_t)strlen(data), data);
+        free(data);
     }
 
-    int error = 0;
-    if(strcmp(worker_type, "Text") == 0) {
-        error = DISTORSION_compressText(path, atoi(factor));
-    } else if(FILES_has_extension(fileName, (const char *[]) { ".wav", NULL })) {
-        write(STDOUT_FILENO, "Compressing audio file\n", 24);
-        error = SO_compressAudio(path, atoi(factor));
-        write(STDOUT_FILENO, "Audio file compressed\n", 23);
-    } else {
-        error = SO_compressImage(path, atoi(factor));
-    }
-    write(STDOUT_FILENO, "Out\n", 4);
-    switch (error) {
-        case 0:
-            write(STDOUT_FILENO, "The image was distorted successfully\n", 37);
-            break;
-        case -1:
-            write(STDOUT_FILENO, "The image could not be read\n", 29);
-            return;
-        case -2:
-            write(STDOUT_FILENO, "The scaling factor is too large for the image\n", 47);
-            return;
-        case -3:
-            write(STDOUT_FILENO, "Memory allocation error\n", 25);
-        return;
-        case -4:
-            write(STDOUT_FILENO, "Error creating the temporary file\n", 35);
-            return;
-        case -5:
-            write(STDOUT_FILENO, "Unsupported image format\n", 26);
-            return;
-        case -6:
-            write(STDOUT_FILENO, "Error creating the final file\n", 31);
-            return;
-        case -7:
-            write(STDOUT_FILENO, "The audio file is not a WAV file. Only WAV files are supported\n", 63);
-            return;
-        default:
-            break;
+    if (*stop_signal) {  
+        write(STDOUT_FILENO, "Stopping file reception due to signal...\n", 42);
+        return 1;
     }
 
-    char* fileSize3 = FILES_get_size_of_file(path);
-    char* distortedMd5 = DISTORSION_getMD5SUM(path);
-    printf("FileSize3: %s\n", fileSize3);
-    printf("Distorted MD5: %s\n", distortedMd5);
-    char* data = (char*)malloc(256 * sizeof(char));
-    sprintf(data, "%s&%s", fileSize3, distortedMd5);
-    TRAMA_sendMessageToSocket(fleckSock, 0x04, (int16_t)strlen(data), data);
-    free(data);
 
+    fileSize3 = FILES_get_size_of_file(path);
+    element->status = 3;
     int fd2 = open(path, O_RDONLY);
     if (fd2 < 0) {
         write(STDOUT_FILENO, "Error: Cannot open file\n", 25);
-        return;
+        return 1;
     }
 
+    int bytes_to_write2 = atoi(fileSize3);
+    element->bytes_to_writeF2 = bytes_to_write2;    
     int bytes_written2 = 0;
     char* buf = (char*)malloc(sizeof(char) * 247);
     char* message = (char*)malloc(sizeof(char) * 256);
     int sizeOfBuf = 0;
     write(STDOUT_FILENO, "Sending distorted file to Fleck...\n", 36);
-    int a = 0;
-    while (atoi(fileSize3) > bytes_written2) {
+    while (bytes_to_write2 > bytes_written2) {
+        if (*stop_signal) {  
+            write(STDOUT_FILENO, "Stopping file reception due to signal...\n", 42);
+            close(fd2);
+            return 1;
+        }
         memset(buf, '\0', 247);
         memset(message, '\0', 256);
         sizeOfBuf = read(fd2, buf, 247);  
         memcpy(message, buf, sizeOfBuf);
-        bytes_written2 += sizeOfBuf;         
-        pthread_mutex_lock(&harleyMutex);
-        TRAMA_sendMessageToSocket(fleckSock, 0x05, sizeOfBuf, message);
-        pthread_mutex_unlock(&harleyMutex);
-        a++;
+        bytes_written2 += sizeOfBuf;     
+        element->bytes_writtenF2 = bytes_written2;   
+        pthread_mutex_lock(&myMutex);
+        TRAMA_sendMessageToSocket(element->fd, 0x05, sizeOfBuf, message);
+        pthread_mutex_unlock(&myMutex);
     }
     close(fd2);
-    printf("Value of a: %d\n", a); 
-    printf("Bytes to write: %d\n", atoi(fileSize3)); 
-    printf("Bytes written: %d\n", bytes_written2);
 
-    if(TRAMA_readMessageFromSocket(fleckSock, &htrama) < 0) {
+
+    if(TRAMA_readMessageFromSocket(element->fd, &htrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
-        return;
+        return 1;
     } else if (htrama.tipo == 0x06  && strcmp((const char *)htrama.data, "CHECK_OK") == 0) {
         write(STDOUT_FILENO, "File distorted successfully.\n\n", 31);
     } else if (htrama.tipo == 0x06  && strcmp((const char *)htrama.data, "CHECK_KO") == 0) {
@@ -276,12 +296,19 @@ void DISTORSION_distortFile(int fleckSock, char* directory, char* MD5SUM, char* 
     } else {
         write(STDOUT_FILENO, "Error: Invalid trama type.\n", 27);
         free(htrama.data);
-        return;
+        return 1;
     } 
-
+    if (remove(path) == 0) {
+        write(STDOUT_FILENO, "Archivo eliminado\n", 18);
+    } else {
+        perror("Error al eliminar el archivo");
+    }
     free(htrama.data);
     free(buf);
     free(actualMd5);
     free(fileSize2);
     free(path);
+
+    element->status = 4;
+    return 0;   
 }

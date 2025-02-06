@@ -65,8 +65,6 @@ int TRAMA_readMessageFromSocket(int sockfd, struct trama *trama) {
     checksum = TRAMA_calculate_checksum(buffer);
     if (checksum != trama->checksum) {
         perror("Error: Checksum validation failed");
-        free(trama->data);  // Liberar memoria antes de salir
-        trama->data = NULL;
         return -1;
     }
 

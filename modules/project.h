@@ -4,6 +4,7 @@
 // Todos los módulos del proyecto
 #include "files.h"
 #include "../linkedlist/linkedlist.h"
+#include "../linkedlist/linkedlist2.h"
 #include "string.h"
 #include "trama.h"
 #include "socket.h"

@@ -35,7 +35,23 @@ void free_config() {
 
 int i = 0;
 
-void searchWorkerAndSendInfo(int fleckSock, char* type) {
+// Function to log an event (used by Gotham process)
+void log_event(const char *event) {
+    char timestamped_event[256];
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+
+    // Format: "[YYYY-MM-DD HH:MM:SS] <event>\n"
+    snprintf(timestamped_event, sizeof(timestamped_event), "[%04d-%02d-%02d %02d:%02d:%02d] %s\n",
+             t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+             t->tm_hour, t->tm_min, t->tm_sec, event);
+
+    pthread_mutex_lock(&log_mutex);
+    write(pipe_fds[1], timestamped_event, strlen(timestamped_event));
+    pthread_mutex_unlock(&log_mutex);
+}
+
+void searchWorkerAndSendInfo(int fleckSock, char* type, uint16_t longitud) {
     listElement* element = NULL;
     char* message = (char*)malloc(sizeof(char) * 256);
     
@@ -60,11 +76,11 @@ void searchWorkerAndSendInfo(int fleckSock, char* type) {
     if(element == NULL) {
         sprintf(message, "\nNo workers of type %s available.\n\n", type);
         write(STDOUT_FILENO, message, strlen(message));
-        TRAMA_sendMessageToSocket(fleckSock, 0x10, (int16_t)strlen("DISTORT_KO"), "DISTORT_KO");
+        TRAMA_sendMessageToSocket(fleckSock, longitud, (int16_t)strlen("DISTORT_KO"), "DISTORT_KO");
     } else {
         write(STDOUT_FILENO, "Worker found, sending to Fleck.\n\n", 33);
         sprintf(message, "%s&%s", element->ip, element->port);  
-        TRAMA_sendMessageToSocket(fleckSock, 0x10, (int16_t)strlen(message), message);
+        TRAMA_sendMessageToSocket(fleckSock, longitud, (int16_t)strlen(message), message);
     }
     free(message);
 }
@@ -91,8 +107,11 @@ void* threadFleck(void* arg) {
         element->sockfd = fleckSock;
         element->fleck_username = username;
         LINKEDLIST_add(listF, element);
-
         char* data = (char*)malloc(sizeof(char) * 256);
+        sprintf(data, "Fleck connected: username=%s", username);
+        log_event(data);
+
+        memset(data, '\0', 256);
         sprintf(data, "\nWelcome %s, you are connected to Gotham.\n\n", username);
         write(STDOUT_FILENO, data, strlen(data));
         TRAMA_sendMessageToSocket(fleckSock, 0x01, 0, "");
@@ -106,19 +125,29 @@ void* threadFleck(void* arg) {
             }
             
             // Process subsequent messages
-            if (gtrama.tipo == 0x10) {
+            if (gtrama.tipo == 0x10 || gtrama.tipo == 0x11) {
                 if (strcmp((const char *)gtrama.data, "CON_KO") == 0) {
                     write(STDOUT_FILENO, "Error: Distortion of this type already in progress.\n", 53);
                     free(gtrama.data); 
                     gtrama.data = NULL;
                 } else {
                     char* type = STRING_getXFromMessage((const char *)gtrama.data, 0);
+                    char* filename = STRING_getXFromMessage((const char *)gtrama.data, 1);
+                    char* data = (char*)malloc(sizeof(char) * 256); 
+                    if (gtrama.tipo == 0x10) {
+                        sprintf(data, "Fleck requested distortion: username=%s, mediaType=%s, filename=%s", username, type, filename);
+                    } else if (gtrama.tipo == 0x11) {
+                        sprintf(data, "Fleck requested continue distortion: username=%s, textType=%s, filename=%s", username, type, filename);
+                    }
+                    log_event(data);
+                    free(data);
+                    free(filename);
 
                     free(gtrama.data); 
                     gtrama.data = NULL;
                     
-                    searchWorkerAndSendInfo(fleckSock, type);
-
+                    searchWorkerAndSendInfo(fleckSock, type, gtrama.tipo);
+                    
                     free(type);
                 }
             } else if (gtrama.tipo == 0x07) {
@@ -129,7 +158,10 @@ void* threadFleck(void* arg) {
                         // Finish using gtrama.data after comparison
                         free(gtrama.data); 
                         gtrama.data = NULL;
-
+                        char* data = (char*)malloc(sizeof(char) * 256);
+                        sprintf(data, "Fleck disconnected: username=%s", currentElement->fleck_username);
+                        log_event(data);
+                        free(data);
                         free(currentElement->fleck_username);
                         free(currentElement);
                         LINKEDLIST_remove(listF);
@@ -176,6 +208,7 @@ void* funcThreadFleckConnecter() {
 }
 
 void* threadWorker(void* arg) {
+    int principal = 0;
     int newsock = *(int*)arg;
     char* aux = (char*)malloc(sizeof(char) * 256);  // Para mensajes temporales
     if (!aux) {
@@ -227,11 +260,35 @@ void* threadWorker(void* arg) {
         element->ip = ip;
         element->port = port;
         element->worker_type = worker_type;
+        element->principal = 0;
         LINKEDLIST_add(listW, element);
-
+        char* data = (char*)malloc(sizeof(char) * 256);
+        sprintf(data, "%s connected: IP:%s:%s", worker_type, ip, port);
+        log_event(data);
+        free(data);
         sprintf(aux, "Worker of type %s added\n\n", worker_type);
         write(STDOUT_FILENO, aux, strlen(aux));
         TRAMA_sendMessageToSocket(newsock, 0x02, 0, "");
+
+        int isFirst = 1;
+        LINKEDLIST_goToHead(listW);
+        while (!LINKEDLIST_isAtEnd(listW)) {
+            listElement* worker = LINKEDLIST_get(listW);
+
+            if (worker == element) {
+                break;
+            }
+            if (strcmp(worker->worker_type, element->worker_type) == 0) {
+                isFirst = 0;
+                break;
+            }
+            LINKEDLIST2_next(listW);
+        }
+        if (isFirst) {
+            element->principal = 1;
+            TRAMA_sendMessageToSocket(element->sockfd, 0x08, 0, "");
+        }
+
     } else {
         free(gtrama.data);
         gtrama.data = NULL;
@@ -256,6 +313,11 @@ void* threadWorker(void* arg) {
                 listElement* currentElement = LINKEDLIST_get(listW);
                 if (strcmp(currentElement->worker_type, (const char *)gtrama.data) == 0 
                     && currentElement->sockfd == newsock) {
+                    char* data = (char*)malloc(sizeof(char) * 256);
+                    principal = currentElement->principal;
+                    sprintf(data, "%s disconnected: IP:%s:%s", currentElement->worker_type, currentElement->ip, currentElement->port);
+                    log_event(data);
+                    free(data);
                     free(currentElement->ip);
                     free(currentElement->port);
                     free(currentElement->worker_type);
@@ -267,6 +329,21 @@ void* threadWorker(void* arg) {
             }
             write(STDOUT_FILENO, "Worker was disconnected.\n\n", 27);
             LINKEDLIST_shuffle(listW);
+            if (!LINKEDLIST_isEmpty(listW) && principal == 1) {
+                LINKEDLIST_goToHead(listW);
+                while (!LINKEDLIST_isAtEnd(listW)) {
+                    listElement* firstWorker = LINKEDLIST_get(listW);
+                    if (strcmp(firstWorker->worker_type, (const char *)gtrama.data) == 0) {
+                        TRAMA_sendMessageToSocket(firstWorker->sockfd, 0x08, 0, "");
+                        char* data = (char*)malloc(sizeof(char) * 256);
+                        sprintf(data, "%s is now the principal worker: IP:%s:%s", firstWorker->worker_type, firstWorker->ip, firstWorker->port);
+                        log_event(data);
+                        free(data);
+                        break;
+                    }
+                    LINKEDLIST_next(listW);
+                }
+            }
             free(gtrama.data);  // Liberar gtrama.data tras procesar
             gtrama.data = NULL;
             break;  // Salir del bucle
@@ -369,22 +446,6 @@ void write_to_log(int pipe_fd) {
 
     close(log_fd);
     close(pipe_fd);
-}
-
-// Function to log an event (used by Gotham process)
-void log_event(const char *event) {
-    char timestamped_event[256];
-    time_t now = time(NULL);
-    struct tm *t = localtime(&now);
-
-    // Format: "[YYYY-MM-DD HH:MM:SS] <event>\n"
-    snprintf(timestamped_event, sizeof(timestamped_event), "[%04d-%02d-%02d %02d:%02d:%02d] %s\n",
-             t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
-             t->tm_hour, t->tm_min, t->tm_sec, event);
-
-    pthread_mutex_lock(&log_mutex);
-    write(pipe_fds[1], timestamped_event, strlen(timestamped_event));
-    pthread_mutex_unlock(&log_mutex);
 }
 
 int main(int argc, char *argv[]) {

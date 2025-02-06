@@ -1,0 +1,37 @@
+SO:
+
+F4 -> Arkham: Debemos irlo llamando después de cada acción de gotham para ir logeando las acciones.
+
+Eventos a registrar: 
+Harley connected: IP:172.16.205.3:9869 done
+Fleck connected: username=Arthur done
+Harley connected: IP:172.16.205.3:9870 done
+Fleck requested distortion: username=arthur, mediaType=MEDIA, fileName=image.jpg done
+Harley assigned as primary worker: IP:172.16.205.3:9869 ?
+Harley disconnected: IP:172.16.205.3:9869 done
+Fleck disconnected: done
+New Harley assigned as primary worker: IP:172.16.205.3:9870 ?
+
+¿Es obligatorio que el gotham notifique con un mensaje al nuevo worker principal?
+Ahora mismo tengo a los Workers esperando. Y el gotham hace un shuffle LINKEDLIST cuando un worker se pira (prq dice que tenia que ser aleatorio).
+
+¿Cuando un fleck pide una distorsión pero ya esta realizando una de ese tipo, puede decir que ya hay una en proceso y pasar o se ha de poner a la cola?
+
+Montserrat gotham y fleck
+Matagalls enigma
+puigpedros Harley
+
+Makefile para ejecutar directamente con valgrind.
+
+booleano stop signal (PUNTERO), CTRL+C en el worker se cambia stop signal, dentro del thread de cada distorsion. En la lectura o en el envio, cada read o cada write reviso si ha cambiado stopsignal. 
+O después de la distorsion también. con return NULL
+
+Worker que cambia stop signal, se queda esperando a todos los threads con un while (en cada struct de la linked pone el id del thread) para hacer el join. Guarda todo en la cola de mensajes.
+
+COLA DE MENSAJES:
+GUARDAR EN LA COLA DE MENSAJES
+ID de la cola de mensajes ftok("worker.c", 0 (media) / 1 (text) ); (Tengo que tener dos distintas)
+Crea la cola de mensajes int msquid = msgget ftok CREAT 0666
+Pasa por cada elemento de la lista 
+(preparar la estructura: long message_type y luego toda la info que quieras enviar(factor, bytes, fd = -1)
+y hace msgsend.

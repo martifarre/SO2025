@@ -15,6 +15,9 @@
 #include "so_compression.h"
 #include <errno.h>
 #include <ctype.h>
+#include <sys/ipc.h>
+#include "../linkedlist/linkedlist2.h"
+#include <sys/msg.h>
 
 #define NO_ERROR 0
 #define ERROR_OPENING_FILE -1
@@ -24,7 +27,7 @@
 #define ERROR_MEMORY_ALLOCATION -5
 
 char* DISTORSION_getMD5SUM(const char* path);
-void DISTORSION_distortFile(int sockfd, char* directory, char* MD5SUM, char* factor, char* fileSize, char* fileName, char* worker_type);  
+int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_signal);
 int DISTORSION_compressText(char *input_file, int word_limit);
 
 #endif // FILES_H
