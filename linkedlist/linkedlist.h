@@ -32,6 +32,7 @@ typedef struct{
     char* worker_type;
     char* fleck_username;
     int principal;
+    pthread_t thread_id;
 } listElement;
 
 

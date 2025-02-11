@@ -31,6 +31,12 @@ int SOCKET_initSocket(char* incoming_Port, char* incoming_IP) {
         exit(EXIT_FAILURE);
     }
 
+    int optval = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
+        write(STDOUT_FILENO, "Error: Cannot set SO_REUSEADDR\n", 31);
+        exit(EXIT_FAILURE);
+    }
+
     if (bind (sockfd, (void *) &s_addr, sizeof (s_addr)) < 0) {
         write(STDOUT_FILENO, "Error: Cannot bind socket\n", 27);
         exit (EXIT_FAILURE);

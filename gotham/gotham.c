@@ -18,11 +18,15 @@ GothamConfig config;
 LinkedList listW; 
 LinkedList listF;
 
+int gotham_flag = 0;
+
 //arkham pipe and mutex
 int pipe_fds[2];
 pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int fleck_connecter_fd = -1, worker_connecter_fd = -1;
+
+int pipefd[2];
 
 
 
@@ -106,6 +110,7 @@ void* threadFleck(void* arg) {
         listElement* element = (listElement*)malloc(sizeof(listElement));
         element->sockfd = fleckSock;
         element->fleck_username = username;
+        element->thread_id = pthread_self();
         LINKEDLIST_add(listF, element);
         char* data = (char*)malloc(sizeof(char) * 256);
         sprintf(data, "Fleck connected: username=%s", username);
@@ -119,9 +124,15 @@ void* threadFleck(void* arg) {
 
         // Now enter the loop to read subsequent messages
         while (1) {
-            if (TRAMA_readMessageFromSocket(fleckSock, &gtrama) < 0) {
-                write(STDOUT_FILENO, "Error: Checksum not validated..\n", 32);
+            int result = TRAMA_readMessageFromSocket(fleckSock, &gtrama);
+            if(result == -2) {
+                write(STDOUT_FILENO, "Thread Worker OUT.\n", strlen("Thread Worker OUT.\n"));
                 return NULL;
+            }
+            if (result < 0) {
+                write(STDOUT_FILENO, "Error: Checksum not validated....\n", 35);
+                free(gtrama.data);
+                break;  // Salir del bucle
             }
             
             // Process subsequent messages
@@ -192,22 +203,36 @@ void* funcThreadFleckConnecter() {
     
     int newsock;
     struct sockaddr_in c_addr;
-    socklen_t c_len = sizeof (c_addr);
+    socklen_t c_len = sizeof(c_addr);
 
-    while(1) {
-        newsock = accept(fleck_connecter_fd, (void *) &c_addr, &c_len);
+    // 🔹 Poner el socket en modo NO BLOQUEANTE
+    fcntl(fleck_connecter_fd, F_SETFL, O_NONBLOCK);
+
+    while (1) {
+        usleep(10000);  // 🔹 Pequeña pausa para evitar alto consumo de CPU
+
+        newsock = accept(fleck_connecter_fd, (struct sockaddr*)&c_addr, &c_len);
         if (newsock < 0) {
-            write(STDOUT_FILENO, "Error: Cannot accept connection\n", 33);
-            exit (EXIT_FAILURE);
+            if (errno == EWOULDBLOCK || errno == EAGAIN) {
+                if(gotham_flag == 1) {
+                    write(STDOUT_FILENO, "Thread Fleck Connecter OUT.\n", strlen("Thread Fleck Connecter OUT.\n"));
+                    return NULL;
+                }
+                continue;
+            } else {
+                // 🔹 Error grave en `accept()`
+                perror("Error: Cannot accept connection");
+                exit(EXIT_FAILURE);
+            }
         }
 
         pthread_t thread_newFleck;
-        pthread_create(&thread_newFleck, NULL, threadFleck, &newsock); 
-        pthread_detach(thread_newFleck);
+        pthread_create(&thread_newFleck, NULL, threadFleck, &newsock);
     }
 }
 
 void* threadWorker(void* arg) {
+    write(STDOUT_FILENO, "Worker connected\n\n", 19);
     int principal = 0;
     int newsock = *(int*)arg;
     char* aux = (char*)malloc(sizeof(char) * 256);  // Para mensajes temporales
@@ -261,6 +286,7 @@ void* threadWorker(void* arg) {
         element->port = port;
         element->worker_type = worker_type;
         element->principal = 0;
+        element->thread_id = pthread_self();
         LINKEDLIST_add(listW, element);
         char* data = (char*)malloc(sizeof(char) * 256);
         sprintf(data, "%s connected: IP:%s:%s", worker_type, ip, port);
@@ -300,7 +326,12 @@ void* threadWorker(void* arg) {
     free(aux);  // Liberar aux tras el uso inicial
 
     while (1) {
-        if (TRAMA_readMessageFromSocket(newsock, &gtrama) < 0) {
+        int result = TRAMA_readMessageFromSocket(newsock, &gtrama);
+        if(result == -2) {
+            write(STDOUT_FILENO, "Thread Worker OUT.\n", strlen("Thread Worker OUT.\n"));
+            return NULL;
+        }
+        if (result < 0) {
             write(STDOUT_FILENO, "Error: Checksum not validated....\n", 35);
             free(gtrama.data);
             break;  // Salir del bucle
@@ -362,28 +393,46 @@ void* funcThreadWorkerConnecter() {
     
     int newsock;
     struct sockaddr_in c_addr;
-    socklen_t c_len = sizeof (c_addr);
+    socklen_t c_len = sizeof(c_addr);
 
-    while(1) {
-        newsock = accept(worker_connecter_fd, (void *) &c_addr, &c_len);
+    // 🔹 Establecer el socket en modo NO BLOQUEANTE
+    fcntl(worker_connecter_fd, F_SETFL, O_NONBLOCK);
+
+    while (1) {
+        usleep(10000);  // Pequeña espera para no consumir CPU constantemente
+
+        newsock = accept(worker_connecter_fd, (struct sockaddr*)&c_addr, &c_len);
         if (newsock < 0) {
-            write(STDOUT_FILENO, "Error: Cannot accept connection\n", 33);
-            exit (EXIT_FAILURE);
+            if (errno == EWOULDBLOCK || errno == EAGAIN) {
+                if(gotham_flag == 1) {
+                    write(STDOUT_FILENO, "Thread Worker Connecter OUT.\n", strlen("Thread Worker Connecter OUT.\n"));
+                    return NULL;
+                }
+                continue;
+            } else {
+                // 🔹 Error real
+                perror("Error: Cannot accept connection");
+                exit(EXIT_FAILURE);
+            }
         }
-        write(STDOUT_FILENO, "Worker connected\n\n", 19);
 
         pthread_t thread_newWorker;
-        pthread_create(&thread_newWorker, NULL, threadWorker, &newsock); 
-        pthread_detach(thread_newWorker);
+        pthread_create(&thread_newWorker, NULL, threadWorker, &newsock);
     }
 }
 
 void doLogout() {
+    gotham_flag = 1;
+
     LINKEDLIST_goToHead(listF);
     while(!LINKEDLIST_isAtEnd(listF)) {
         listElement* currentElement = LINKEDLIST_get(listF);
+        write(currentElement->sockfd, "OUT", 3);
+        printf("Unlocking socket fleck %d, \n", currentElement->sockfd);
+        shutdown(currentElement->sockfd, SHUT_WR);
         close(currentElement->sockfd);
-
+        pthread_join(currentElement->thread_id, NULL);
+        printf("Unlocked socket fleck %d, \n", currentElement->sockfd);
         free(currentElement->fleck_username);
         free(currentElement);
         LINKEDLIST_remove(listF);
@@ -393,8 +442,12 @@ void doLogout() {
     LINKEDLIST_goToHead(listW);
     while(!LINKEDLIST_isAtEnd(listW)) {
         listElement* currentElement = LINKEDLIST_get(listW);
+        write(currentElement->sockfd, "OUT", 3);
+        printf("Unlocking socket worker %d, \n", currentElement->sockfd);
+        shutdown(currentElement->sockfd, SHUT_WR);
         close(currentElement->sockfd);
-
+        pthread_join(currentElement->thread_id, NULL);
+        printf("Unlocking socket worker %d, \n", currentElement->sockfd);
         free(currentElement->ip);
         free(currentElement->port);
         free(currentElement->worker_type);
@@ -403,6 +456,8 @@ void doLogout() {
         LINKEDLIST_remove(listW);
         //LINKEDLIST_next(listW);
     }
+
+    
 }
 
 void CTRLC(int signum) {
@@ -426,26 +481,31 @@ void CTRLC(int signum) {
 // Signal handler for child process (Arkham)
 void signalHandlerArkham(int signum) {
     close(pipe_fds[0]); // Close the read end of the pipe
+
     exit(EXIT_SUCCESS);
 }
 
 // Function to write to the log file (used by Arkham process)
 void write_to_log(int pipe_fd) {
-    int log_fd = open("logs.txt", O_WRONLY | O_CREAT | O_APPEND, 0666);
-    if (log_fd < 0) {
-        perror("Error opening logs.txt");
-        exit(1);
-    }
+    
 
     char buffer[256];
     ssize_t bytes_read;
     while ((bytes_read = read(pipe_fd, buffer, sizeof(buffer) - 1)) > 0) {
+        int log_fd = open("logs.txt", O_WRONLY | O_CREAT | O_APPEND, 0666);
+        if (log_fd < 0) {
+            perror("Error opening logs.txt");
+            exit(1);
+        }
+        
         buffer[bytes_read] = '\0'; // Null-terminate the string
         write(log_fd, buffer, strlen(buffer));
+        close(log_fd);
     }
 
-    close(log_fd);
+    
     close(pipe_fd);
+    
 }
 
 int main(int argc, char *argv[]) {
@@ -459,6 +519,11 @@ int main(int argc, char *argv[]) {
     config = READCONFIG_read_config_gotham(argv[1]);
     if (pipe(pipe_fds) == -1) {
         perror("Error creating pipe");
+        exit(EXIT_FAILURE);
+    }
+
+    if (pipe(pipefd) == -1) {
+        perror("[ERROR] No se pudo crear la pipe");
         exit(EXIT_FAILURE);
     }
 

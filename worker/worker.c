@@ -24,6 +24,24 @@ int fleckSock = -1, sockfd = -1, fleck_connecter_fd = -1;
 
 LinkedList2 listE;
 LinkedList2 listH;
+
+typedef struct {
+    long message_type;
+    char filename[256];  // Ajusta el tamaño según lo necesario
+    char username[64]; 
+    char worker_type[64]; 
+    char factor[64]; 
+    int bytes_writtenF1;
+    int bytes_to_writeF1;
+    int bytes_writtenF2;
+    int bytes_to_writeF2;
+    int fd;
+    char MD5SUM[64];
+    char directory[256];
+    pthread_t thread_id;
+    int status; // 0: No empezada, 1: Transfiriendo1 , 2: Distorsionando, 3: Transfiriendo2, 4: Completada
+} MessageQueueElement;
+
 /***********************************************
 *
 * @Finalidad: Liberar la memoria asignada dinámicamente para la configuración.
@@ -41,25 +59,46 @@ void free_config() {
 }
 
 void read_from_msq(LinkedList2 listW, int type) {
+    printf("[DEBUG] Iniciando `read_from_msq` con type=%d\n", type);
+
     key_t key = ftok("worker.c", type);
+    printf("[DEBUG] Clave generada: %d\n", key);
+
     int msqid = msgget(key, IPC_CREAT | 0666);
     if (msqid == -1) {
-        perror("msgget failed");
+        perror("[ERROR] msgget failed");
         return;
     }
 
-    listElement2 msg;
+    printf("[DEBUG] Cola de mensajes obtenida con ID: %d\n", msqid);
+
+    MessageQueueElement msg;
     while (1) {
-        if (msgrcv(msqid, &msg, sizeof(listElement2) - sizeof(long), 1, IPC_NOWAIT) == -1) {
+        printf("[DEBUG] Esperando mensajes en la cola...\n");
+        if (msgrcv(msqid, &msg, sizeof(MessageQueueElement) - sizeof(long), 0, IPC_NOWAIT) == -1) {
             if (errno == ENOMSG) {
+                printf("[DEBUG] No hay más mensajes en la cola.\n");
                 break;
             } else {
-                perror("msgrcv failed");
+                perror("[ERROR] msgrcv failed");
             }
         } else {
+            printf("[DEBUG] Mensaje recibido:\n");
+            printf("        Filename: %s\n", msg.filename);
+            printf("        Username: %s\n", msg.username);
+            printf("        Worker Type: %s\n", msg.worker_type);
+            printf("        Factor: %s\n", msg.factor);
+            printf("        Status: %d\n", msg.status);
+            printf("        MD5SUM: %s\n", msg.MD5SUM);
+            printf("        Directory: %s\n", msg.directory);
+            printf("        Bytes written F1: %d\n", msg.bytes_writtenF1);
+            printf("        Bytes to write F1: %d\n", msg.bytes_to_writeF1);
+            printf("        Bytes written F2: %d\n", msg.bytes_writtenF2);
+            printf("        Bytes to write F2: %d\n", msg.bytes_to_writeF2);
+
             listElement2* newWorker = malloc(sizeof(listElement2));
             if (!newWorker) {
-                perror("Memory allocation failed");
+                perror("[ERROR] Memory allocation failed");
                 continue;
             }
 
@@ -68,7 +107,8 @@ void read_from_msq(LinkedList2 listW, int type) {
             newWorker->factor = strdup(msg.factor);
             newWorker->MD5SUM = strdup(msg.MD5SUM);
             newWorker->directory = strdup(msg.directory);
-            strncpy(newWorker->fileName, msg.fileName, sizeof(newWorker->fileName));
+            newWorker->fileName = strdup(msg.filename);
+
             newWorker->bytes_writtenF1 = msg.bytes_writtenF1;
             newWorker->bytes_to_writeF1 = msg.bytes_to_writeF1;
             newWorker->bytes_writtenF2 = msg.bytes_writtenF2;
@@ -76,53 +116,98 @@ void read_from_msq(LinkedList2 listW, int type) {
             newWorker->fd = msg.fd;
             newWorker->thread_id = msg.thread_id;
             newWorker->status = msg.status;
+
+            printf("[DEBUG] Nuevo elemento creado y agregado a la LinkedList.\n");
             LINKEDLIST2_add(listW, newWorker);
         }
     }
+
+    // 🔹 Definir `buf` antes de usarlo
+    struct msqid_ds buf;  
+    msgctl(msqid, IPC_STAT, &buf);
+    if (buf.msg_qnum == 0) { // Solo eliminar si ya no hay mensajes
+        printf("[DEBUG] Cerrando todos los descriptores abiertos...\n");
+
+        // Intentar cerrar la cola antes de eliminarla
+        if (msgctl(msqid, IPC_RMID, NULL) == 0) {
+            printf("[DEBUG] Cola de mensajes eliminada correctamente.\n");
+        } else {
+            perror("[ERROR] No se pudo eliminar la cola");
+        }
+    } else {
+        printf("[WARNING] La cola aún tiene mensajes, no se eliminó.\n");
+    }
+    printf("[DEBUG] Terminando `read_from_msq`\n");
 }
 
 void send_to_msq(listElement2* element, int workerType) {
     if (element == NULL) {
-        write(STDOUT_FILENO, "Error: NULL element in send_to_message_queue.\n", 47);
+        write(STDOUT_FILENO, "[ERROR] NULL element in send_to_message_queue.\n", 47);
         return;
     }
+
+    printf("[DEBUG] Iniciando `send_to_msq` con workerType=%d\n", workerType);
 
     key_t key = ftok("worker.c", workerType);
+    printf("[DEBUG] Clave generada: %d\n", key);
+
     int msqid = msgget(key, IPC_CREAT | 0666);
     if (msqid == -1) {
-        perror("Error creating/getting message queue");
+        perror("[ERROR] Error creating/getting message queue");
         return;
     }
 
-    listElement2 msg;
-    msg.message_type = 1;
-    
-    strncpy(msg.fileName, element->fileName, sizeof(msg.fileName));
+    printf("[DEBUG] Cola de mensajes obtenida con ID: %d\n", msqid);
 
-    msg.username = strdup(element->username);
-    msg.worker_type = strdup(element->worker_type);
-    msg.factor = strdup(element->factor);
-    msg.MD5SUM = strdup(element->MD5SUM);
-    msg.directory = strdup(element->directory);
+    MessageQueueElement msg;
+    memset(&msg, 0, sizeof(MessageQueueElement));
+
+    msg.message_type = 1;
+
+    strncpy(msg.filename, element->fileName, sizeof(msg.filename) - 1);
+    msg.filename[sizeof(msg.filename) - 1] = '\0';
+
+    strncpy(msg.username, element->username, sizeof(msg.username) - 1);
+    msg.username[sizeof(msg.username) - 1] = '\0';
+
+    strncpy(msg.worker_type, element->worker_type, sizeof(msg.worker_type) - 1);
+    msg.worker_type[sizeof(msg.worker_type) - 1] = '\0';
+
+    strncpy(msg.factor, element->factor, sizeof(msg.factor) - 1);
+    msg.factor[sizeof(msg.factor) - 1] = '\0';
+
+    strncpy(msg.MD5SUM, element->MD5SUM, sizeof(msg.MD5SUM) - 1);
+    msg.MD5SUM[sizeof(msg.MD5SUM) - 1] = '\0';
+
+    strncpy(msg.directory, element->directory, sizeof(msg.directory) - 1);
+    msg.directory[sizeof(msg.directory) - 1] = '\0';
+
     msg.bytes_writtenF1 = element->bytes_writtenF1;
     msg.bytes_to_writeF1 = element->bytes_to_writeF1;
     msg.bytes_writtenF2 = element->bytes_writtenF2;
     msg.bytes_to_writeF2 = element->bytes_to_writeF2;
-    msg.fd = -1; 
+    msg.fd = -1; // Lo forzamos a -1
     msg.thread_id = element->thread_id;
     msg.status = element->status;
 
-    if (msgsnd(msqid, &msg, sizeof(listElement2) - sizeof(long), 0) == -1) {
-        perror("Error sending message to queue");
-    } else {
-        write(STDOUT_FILENO, "Message successfully sent to queue.\n", 37);
-    }
+    printf("[DEBUG] Enviando mensaje a la cola:\n");
+    printf("        Filename: %s\n", msg.filename);
+    printf("        Username: %s\n", msg.username);
+    printf("        Worker Type: %s\n", msg.worker_type);
+    printf("        Factor: %s\n", msg.factor);
+    printf("        Status: %d\n", msg.status);
+    printf("        MD5SUM: %s\n", msg.MD5SUM);
+    printf("        Directory: %s\n", msg.directory);
+    printf("        Bytes written F1: %d\n", msg.bytes_writtenF1);
+    printf("        Bytes to write F1: %d\n", msg.bytes_to_writeF1);
+    printf("        Bytes written F2: %d\n", msg.bytes_writtenF2);
+    printf("        Bytes to write F2: %d\n", msg.bytes_to_writeF2);
 
-    free(msg.username);
-    free(msg.worker_type);
-    free(msg.factor);
-    free(msg.MD5SUM);
-    free(msg.directory);
+    if (msgsnd(msqid, &msg, sizeof(MessageQueueElement) - sizeof(long), 0) == -1) {
+        perror("[ERROR] Error sending message to queue");
+    } else {
+        write(STDOUT_FILENO, "[DEBUG] Message successfully sent to queue.\n", 44);
+    }
 }
 
 void* distortFileThread(void* arg) {
@@ -133,7 +218,7 @@ void* distortFileThread(void* arg) {
     }
 
     element->thread_id = pthread_self(); 
-    if(DISTORSION_distortFile(element, stop_signal) == 0) {
+    if (DISTORSION_distortFile(element, stop_signal) == 0) {
         LinkedList2 targetList = (strcmp(element->worker_type, "Media") == 0) ? listH : listE;
         if (!LINKEDLIST2_isEmpty(targetList)) {
             LINKEDLIST2_goToHead(targetList);
@@ -141,7 +226,15 @@ void* distortFileThread(void* arg) {
                 listElement2* current = LINKEDLIST2_get(targetList);
                 if (current == element) {
                     LINKEDLIST2_remove(targetList);
-                    free(element);
+
+                    free(element->fileName);
+                    free(element->username);
+                    free(element->worker_type);
+                    free(element->factor);
+                    free(element->MD5SUM);
+                    free(element->directory);
+                    
+                    free(element);  
                     break;
                 }
                 LINKEDLIST2_next(targetList);
@@ -170,22 +263,23 @@ void initServer() {
         free(wtrama.data);
     }
 
-    if(strcmp(config.worker_type, "Media") == 0) {
-        read_from_msq(listH, MEDIA);
-    } else if(strcmp(config.worker_type, "Text") == 0) {
-        read_from_msq(listE, TEXT);
-    }
-
     fleck_connecter_fd = SOCKET_initSocket(config.worker_server_port, config.worker_server_ip);
     struct sockaddr_in c_addr;
     socklen_t c_len = sizeof(c_addr);
 
-    char* data = (char*)malloc(sizeof(char) * 256);
     while (1) {
         fleckSock = accept(fleck_connecter_fd, (void *)&c_addr, &c_len);
         if (fleckSock < 0) {
             write(STDOUT_FILENO, "Error: Cannot accept connection\n", 33);
             exit(EXIT_FAILURE);
+        }
+
+        sleep(3);   
+
+        if(strcmp(config.worker_type, "Media") == 0) {
+            read_from_msq(listH, MEDIA);
+        } else if(strcmp(config.worker_type, "Text") == 0) {
+            read_from_msq(listE, TEXT);
         }
 
         struct trama wtrama;
@@ -203,7 +297,8 @@ void initServer() {
         char* MD5SUM = STRING_getXFromMessage((const char *)wtrama.data, 3);
         char* factor = STRING_getXFromMessage((const char *)wtrama.data, 4);
 
-        sprintf(data, "Fleck name: %s File received: %s\n", userName, fileName);
+        char *data = NULL;
+        if (asprintf(&data, "Fleck name: %s File received: %s\n", userName, fileName) == -1) return;
         write(STDOUT_FILENO, data, strlen(data));
         free(data);
 
@@ -213,13 +308,17 @@ void initServer() {
         int found = 0;
 
         if (!LINKEDLIST2_isEmpty(targetList)) {
+            write(STDOUT_FILENO, "List not empty...\n", 19);
             LINKEDLIST2_goToHead(targetList);
             while (!LINKEDLIST2_isAtEnd(targetList)) {
                 listElement2* element = LINKEDLIST2_get(targetList);
+                printf("Filename element: %s, filaname: %s\n", element->fileName, fileName);
+                printf("Username element: %s, username: %s\n", element->username, userName);
                 if (strcmp(element->fileName, fileName) == 0 && strcmp(element->username, userName) == 0) {
                     existingElement = element;
                     existingElement->fd = fleckSock;
                     found = 1;
+                    write (STDOUT_FILENO, "Element found...\n", 18);
                     break;
                 }
                 LINKEDLIST2_next(targetList);
@@ -229,8 +328,7 @@ void initServer() {
         listElement2* newElement = NULL;
         if (!found) {
             newElement = malloc(sizeof(listElement2));
-            strncpy(newElement->fileName, fileName, sizeof(newElement->fileName));
-
+            newElement->fileName = strdup(fileName);
             newElement->username = strdup(userName);
             newElement->worker_type = strdup(config.worker_type);
             newElement->factor = strdup(factor);
@@ -280,8 +378,11 @@ void doLogout() {
             listElement2* element = LINKEDLIST2_get(targetList);
 
             if (element->fd > 0) {
-                TRAMA_sendMessageToSocket(element->fd, 0x07, (int16_t)strlen("CON_KO"), "CON_KO");
+                if(element->status != 1) {
+                    TRAMA_sendMessageToSocket(element->fd, 0x07, (int16_t)strlen("CON_KO"), "CON_KO");
+                }
                 close(element->fd);
+                element->fd = -1;
             }
 
             if (element->thread_id != 0) {
@@ -295,6 +396,13 @@ void doLogout() {
             }
 
             LINKEDLIST2_remove(targetList);
+
+            free(element->fileName);
+            free(element->username);
+            free(element->worker_type);
+            free(element->factor);
+            free(element->MD5SUM);
+            free(element->directory);
             free(element);
         }
     }
@@ -309,6 +417,8 @@ void CTRLC(int signum) {
 
     close(fleck_connecter_fd);
     free_config();
+    LINKEDLIST2_destroy(&listE);
+    LINKEDLIST2_destroy(&listH);
 
     signal(SIGINT, SIG_DFL);
     raise(SIGINT);
@@ -324,6 +434,16 @@ void *connection_watcher() {
                     CTRLC(0);
                 }
             }
+
+
+
+
+
+
+
+
+
+
         }
         sleep(5); // Verifica cada 5 segundos
     }
@@ -338,6 +458,7 @@ int main(int argc, char *argv[]) {
     volatile sig_atomic_t stop_flag = 0;
     stop_signal = &stop_flag;
     signal(SIGINT, CTRLC);
+    signal(SIGPIPE, SIG_IGN);
 
     listE = LINKEDLIST2_create();
     listH = LINKEDLIST2_create();

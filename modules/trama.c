@@ -22,6 +22,11 @@ int TRAMA_readMessageFromSocket(int sockfd, struct trama *trama) {
 
     // Leer los datos del socket
     int bytes_leidos = read(sockfd, buffer, 256);
+    
+    if(bytes_leidos == 3 && strcmp(buffer, "OUT") == 0) {
+        return -2;
+    }
+
     if (bytes_leidos != 256) {
         perror("Error reading from socket, size was not 256 bytes");
         return -1;
@@ -52,7 +57,9 @@ int TRAMA_readMessageFromSocket(int sockfd, struct trama *trama) {
     }
 
     // Si los datos son tratados como cadena, agregar terminador nulo
-    trama->data[trama->longitud] = '\0';
+    if (trama->longitud < 247) {
+        trama->data[trama->longitud] = '\0';  // Solo escribir '\0' si hay espacio
+    }
 
     // Extraer checksum y timestamp
     trama->checksum = ((unsigned char)buffer[250] << 8 | (unsigned char)buffer[251]);

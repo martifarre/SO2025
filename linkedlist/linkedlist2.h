@@ -17,6 +17,7 @@
 
 #include <stdlib.h>
 #include <time.h>
+#include <stdio.h>  
 
 // Constants to manage the list's error codes.
 #define LIST_NO_ERROR 0
@@ -26,8 +27,7 @@
 #define LIST_ERROR_END 4			// Error, the POV is at the end.
 
 typedef struct {
-    long message_type;
-    char fileName[256];
+    char *fileName;
     char *username;
     char *worker_type;
     char* factor;
@@ -37,6 +37,7 @@ typedef struct {
     int bytes_to_writeF2;
     int fd;
     char* MD5SUM;
+    char* distortedMd5;
     char *directory;
     pthread_t thread_id;
     int status; //0: No empezada, 1: Transfiriendo1 , 2: Distorsionando, 3: Transfiriendo2, 4: Completada

@@ -1,6 +1,6 @@
 # Compilador y banderas
 CC = gcc
-CFLAGS = -Wall -MMD
+CFLAGS = -Wall -MMD -g
 LDFLAGS = -lpthread -lm
 
 # Directorio para los binarios
@@ -45,21 +45,20 @@ clean:
 	rm -rf $(BIN_DIR) *.o *.d
 
 g: 
-	cd bin && valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes -s ./gotham ../config/gotham.dat
-
+	cd bin && valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes --track-origins=yes -s ./gotham ../config/gotham.dat
 g2: 
-	cd bin && valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes -s ./gotham ../config/gotham2.dat
+	cd bin && valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes --track-origins=yes -s ./gotham ../config/gotham2.dat
 f: 
-	cd bin && valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes -s ./fleck ../config/fleck.dat
+	cd bin && valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes --track-origins=yes -s ./fleck ../config/fleck.dat
 
 e1: 
-	cd bin && valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes -s ./worker ../config/enigma.dat
+	cd bin && valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes --track-origins=yes -s ./worker ../config/enigma.dat
 
 e2:
-	cd bin && valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes -s ./worker ../config/enigma2.dat
+	cd bin && valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes --track-origins=yes -s ./worker ../config/enigma2.dat
 
 h1:
-	cd bin && valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes -s ./worker ../config/harley.dat
+	cd bin && valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes --track-origins=yes -s ./worker ../config/harley.dat
 
 h2:
-	cd bin && valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes -s ./worker ../config/harley2.dat
+	cd bin && valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes --track-origins=yes -s ./worker ../config/harley2.dat

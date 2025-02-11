@@ -103,14 +103,9 @@ LinkedList2 LINKEDLIST2_create () {
 	// The list's head now is the phantom node.
 	list->head = (Node*) malloc(sizeof(Node));
 	if (NULL != list->head) {
-		// There is noone after the phantom node, so next is NULL.
 		list->head->next = NULL;
-		// We set the previous pointer to the phantom node. Now the point
-		//  of view is after the last valid element in the list (there are 
-		//  no valid elements as the list is empty).
+		list->head->element = NULL;  // 🔹 Evita memoria no inicializada
 		list->previous = list->head;
-
-		// Everything was fine, so we set the error code to NO_ERROR
 		list->error = LIST_NO_ERROR;
 	}
 	else {
@@ -152,6 +147,10 @@ LinkedList2 LINKEDLIST2_create () {
  *
  ****************************************************************************/
 void 	LINKEDLIST2_add (LinkedList2 list, Element2 element) {
+	if (element == NULL) {
+		printf("[ERROR] Intento de agregar un elemento NULL a la lista.\n");
+		return;
+	}
 	// 1- Create a new node to store the new element.
 	Node* new_node = (Node*) malloc (sizeof(Node));
 	if (NULL != new_node) {
@@ -395,23 +394,54 @@ void LINKEDLIST2_shuffle(LinkedList2 list) {
  * @Return: ---
  *
  ****************************************************************************/
-void 	LINKEDLIST2_destroy (LinkedList2* list) {
-	Node* aux;
-	// While there are still NODEs in the list.
-	while (NULL != (*list)->head) {
-		// Take the first node.
-		aux = (*list)->head;
-		// Now the first node is the next node.
-		(*list)->head = (*list)->head->next;
-		// Free who was the first node;
-		free(aux);
-	}
-	// Set the pointers to NULL (best practice).
-	(*list)->head = NULL;
-	(*list)->previous = NULL;
+ void LINKEDLIST2_destroy(LinkedList2* list) {
+    if (list == NULL || *list == NULL) {
+        printf("[DEBUG] La lista ya es NULL. No hay nada que liberar.\n");
+        fflush(stdout);
+        return;
+    }
 
-	free(*list);
-	*list = NULL;
+    printf("[DEBUG] Iniciando destrucción de la LinkedList...\n");
+    fflush(stdout);
+
+    Node* aux;
+    int node_count = 0;
+
+    while ((*list)->head != NULL) {
+        aux = (*list)->head;
+        (*list)->head = (*list)->head->next;
+        node_count++;
+
+        printf("[DEBUG] Liberando nodo #%d en dirección %p...\n", node_count, (void*)aux);
+        fflush(stdout);
+
+        if (aux->element) {
+            free(aux->element->fileName);
+            free(aux->element->username);
+            free(aux->element->worker_type);
+            free(aux->element->factor);
+            free(aux->element->MD5SUM);
+            free(aux->element->distortedMd5);
+            free(aux->element->directory);
+            free(aux->element);
+        } else {
+            printf("[WARNING] aux->element es NULL en nodo #%d, no se libera.\n", node_count);
+            fflush(stdout);
+        }
+
+        free(aux);
+    }
+
+    printf("[DEBUG] La LinkedList ha sido destruida. Liberando la estructura de la lista...\n");
+    fflush(stdout);
+
+    (*list)->head = NULL;
+    (*list)->previous = NULL;
+    free(*list);
+    *list = NULL;
+
+    printf("[DEBUG] LinkedList2 completamente eliminada.\n");
+    fflush(stdout);
 }
 
 /**************************************************************************** 

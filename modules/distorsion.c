@@ -136,22 +136,24 @@ int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_si
     write(STDOUT_FILENO, path, strlen(path));
     char* fileSize3;
     char* actualMd5;
-    char* fileSize2;
 
-    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    int fd = open(path, O_WRONLY | O_CREAT, 0666);
     if (fd < 0) {
         perror("Failed to open file.");
         exit(EXIT_FAILURE);
     }
 
     struct trama htrama;
-    int bytes_written = 0, bytes_to_write = element->bytes_to_writeF1; 
+    printf("Bytes to write: %d\n", element->bytes_to_writeF1);
+    printf("Bytes written: %d\n", element->bytes_writtenF1);
+    int bytes_written = element->bytes_writtenF1, bytes_to_write = element->bytes_to_writeF1; 
     if(element->status == 0 || element->status == 1) {
         element->status = 1;
-        while (bytes_written < bytes_to_write) {
+        while (bytes_written < bytes_to_write) {  
             if (*stop_signal) {  
                 write(STDOUT_FILENO, "Stopping file reception due to signal...\n", 42);
                 close(fd);
+                free(path);
                 return 1;
             }
             if(TRAMA_readMessageFromSocket(element->fd, &htrama) < 0) {
@@ -177,26 +179,34 @@ int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_si
                 exit(EXIT_FAILURE);
             }
             free(incoming_Info);
+            free(htrama.data);
             element->bytes_writtenF1 = bytes_written;
+            usleep(1000); 
         }
-        free(htrama.data);
         element->status = 2;
-    } 
-    close(fd);
-    
-    if(element->status == 2) {
 
         actualMd5 = DISTORSION_getMD5SUM(path);
-        fileSize2 = FILES_get_size_of_file(path);
+        printf("MD5SUM: %s\n", actualMd5);
+    
 
         if(strcmp(element->MD5SUM, actualMd5) == 0) {
             TRAMA_sendMessageToSocket(element->fd, 0x06, (int16_t)strlen("CHECK_OK"), "CHECK_OK");  
         } else {
             TRAMA_sendMessageToSocket(element->fd, 0x06, (int16_t)strlen("CHECK_KO"), "CHECK_KO");  
+            write(STDOUT_FILENO, "Error: CHECK_KO.\n", 18);
             return 1;
         }
+        free(actualMd5);
 
+    } 
+    close(fd);
+
+
+    if(element->status == 2) {
+        write(STDOUT_FILENO, "In\n", 4); 
         int error = 0;
+        printf("Path: %s\n", path);
+        printf("Element->factor: %s\n", element->factor);   
         if(strcmp(element->worker_type, "Text") == 0) {
             error = DISTORSION_compressText(path, atoi(element->factor));
         } else if(FILES_has_extension(element->fileName, (const char *[]) { ".wav", NULL })) {
@@ -205,7 +215,9 @@ int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_si
             error = SO_compressAudio(path, atoi(element->factor));
             write(STDOUT_FILENO, "Audio file compressed\n", 23);
         } else {
+            write(STDOUT_FILENO, "Compressing image file\n", 24);
             error = SO_compressImage(path, atoi(element->factor));
+            write(STDOUT_FILENO, "Image file compressed\n", 22);
         }
 
         write(STDOUT_FILENO, "Out\n", 4);
@@ -243,16 +255,19 @@ int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_si
         char* data = (char*)malloc(256 * sizeof(char));
         sprintf(data, "%s&%s", fileSize3, distortedMd5);
         TRAMA_sendMessageToSocket(element->fd, 0x04, (int16_t)strlen(data), data);
+        printf("Data: %s\n", data);
         free(data);
+        element->bytes_to_writeF2 = atoi(fileSize3);
+        free(fileSize3);
+        free(distortedMd5);
     }
 
     if (*stop_signal) {  
         write(STDOUT_FILENO, "Stopping file reception due to signal...\n", 42);
+        free(path);
         return 1;
     }
 
-
-    fileSize3 = FILES_get_size_of_file(path);
     element->status = 3;
     int fd2 = open(path, O_RDONLY);
     if (fd2 < 0) {
@@ -260,16 +275,24 @@ int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_si
         return 1;
     }
 
-    int bytes_to_write2 = atoi(fileSize3);
-    element->bytes_to_writeF2 = bytes_to_write2;    
-    int bytes_written2 = 0;
+    int bytes_to_write2 = element->bytes_to_writeF2;  
+    int bytes_written2 = element->bytes_writtenF2;
+    printf("Bytes to write: %d\n", bytes_to_write2);
+    printf("Bytes written: %d\n", bytes_written2);
     char* buf = (char*)malloc(sizeof(char) * 247);
     char* message = (char*)malloc(sizeof(char) * 256);
     int sizeOfBuf = 0;
     write(STDOUT_FILENO, "Sending distorted file to Fleck...\n", 36);
+    
+    if (bytes_written2 > 0) {
+        lseek(fd2, bytes_written2, SEEK_SET);
+        printf("[DEBUG] Saltando %d bytes, comenzando desde la posición correcta.\n", bytes_written2);
+    }
+    
     while (bytes_to_write2 > bytes_written2) {
         if (*stop_signal) {  
             write(STDOUT_FILENO, "Stopping file reception due to signal...\n", 42);
+            free(path);
             close(fd2);
             return 1;
         }
@@ -282,8 +305,12 @@ int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_si
         pthread_mutex_lock(&myMutex);
         TRAMA_sendMessageToSocket(element->fd, 0x05, sizeOfBuf, message);
         pthread_mutex_unlock(&myMutex);
+        usleep(1000); 
     }
     close(fd2);
+
+    free(buf);
+    free(message);
 
 
     if(TRAMA_readMessageFromSocket(element->fd, &htrama) < 0) {
@@ -298,17 +325,16 @@ int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_si
         free(htrama.data);
         return 1;
     } 
+
     if (remove(path) == 0) {
         write(STDOUT_FILENO, "Archivo eliminado\n", 18);
     } else {
         perror("Error al eliminar el archivo");
     }
     free(htrama.data);
-    free(buf);
-    free(actualMd5);
-    free(fileSize2);
     free(path);
 
     element->status = 4;
+    close(element->fd);
     return 0;   
 }
