@@ -144,9 +144,7 @@ int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_si
     }
 
     struct trama htrama;
-    printf("Bytes to write: %d\n", element->bytes_to_writeF1);
-    printf("Bytes written: %d\n", element->bytes_writtenF1);
-    int bytes_written = element->bytes_writtenF1, bytes_to_write = element->bytes_to_writeF1; 
+    int bytes_written = 0, bytes_to_write = element->bytes_to_writeF1; 
     if(element->status == 0 || element->status == 1) {
         element->status = 1;
         while (bytes_written < bytes_to_write) {  
@@ -166,13 +164,18 @@ int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_si
                 write(STDOUT_FILENO, "Error: Invalid trama type.\n", 28);
                 return 1;
             }
+
             char* incoming_Info = NULL;
-            if (bytes_to_write - bytes_written < 247) {
+            if(bytes_written < element->bytes_writtenF1) {
+                bytes_written += 247;
+            } else if (bytes_to_write - bytes_written < 247) {
                 incoming_Info = STRING_getSongCode((const char *)htrama.data, bytes_to_write - bytes_written);
                 bytes_written += write(fd, incoming_Info, bytes_to_write - bytes_written);
+                element->bytes_writtenF1 = bytes_written;
             } else {
                 incoming_Info = STRING_getSongCode((const char *)htrama.data, 247);
                 bytes_written += write(fd, incoming_Info, 247);
+                element->bytes_writtenF1 = bytes_written;
             }
             if (bytes_written < 0) {
                 perror("Failed to write to file.");
@@ -180,15 +183,12 @@ int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_si
             }
             free(incoming_Info);
             free(htrama.data);
-            element->bytes_writtenF1 = bytes_written;
-            usleep(1000); 
+            usleep(1); 
         }
         element->status = 2;
 
         actualMd5 = DISTORSION_getMD5SUM(path);
-        printf("MD5SUM: %s\n", actualMd5);
     
-
         if(strcmp(element->MD5SUM, actualMd5) == 0) {
             TRAMA_sendMessageToSocket(element->fd, 0x06, (int16_t)strlen("CHECK_OK"), "CHECK_OK");  
         } else {
@@ -205,8 +205,6 @@ int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_si
     if(element->status == 2) {
         write(STDOUT_FILENO, "In\n", 4); 
         int error = 0;
-        printf("Path: %s\n", path);
-        printf("Element->factor: %s\n", element->factor);   
         if(strcmp(element->worker_type, "Text") == 0) {
             error = DISTORSION_compressText(path, atoi(element->factor));
         } else if(FILES_has_extension(element->fileName, (const char *[]) { ".wav", NULL })) {
@@ -252,10 +250,18 @@ int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_si
         fileSize3 = FILES_get_size_of_file(path);
         char* distortedMd5 = DISTORSION_getMD5SUM(path);
 
+        if(!SOCKET_isSocketOpen(element->fd)) {
+            write(STDOUT_FILENO, "Fleck socket closed. Cannot send distorted file.\n", 50);
+            close(element->fd);
+            free(path);
+            free(fileSize3);
+            free(distortedMd5);
+            return 2;
+        }
+
         char* data = (char*)malloc(256 * sizeof(char));
         sprintf(data, "%s&%s", fileSize3, distortedMd5);
         TRAMA_sendMessageToSocket(element->fd, 0x04, (int16_t)strlen(data), data);
-        printf("Data: %s\n", data);
         free(data);
         element->bytes_to_writeF2 = atoi(fileSize3);
         free(fileSize3);
@@ -275,19 +281,12 @@ int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_si
         return 1;
     }
 
-    int bytes_to_write2 = element->bytes_to_writeF2;  
-    int bytes_written2 = element->bytes_writtenF2;
-    printf("Bytes to write: %d\n", bytes_to_write2);
-    printf("Bytes written: %d\n", bytes_written2);
+    int bytes_to_write2 = element->bytes_to_writeF2, bytes_written2 = 0;
+    element->bytes_writtenF2 = bytes_written2;
     char* buf = (char*)malloc(sizeof(char) * 247);
     char* message = (char*)malloc(sizeof(char) * 256);
     int sizeOfBuf = 0;
     write(STDOUT_FILENO, "Sending distorted file to Fleck...\n", 36);
-    
-    if (bytes_written2 > 0) {
-        lseek(fd2, bytes_written2, SEEK_SET);
-        printf("[DEBUG] Saltando %d bytes, comenzando desde la posición correcta.\n", bytes_written2);
-    }
     
     while (bytes_to_write2 > bytes_written2) {
         if (*stop_signal) {  
@@ -305,7 +304,7 @@ int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_si
         pthread_mutex_lock(&myMutex);
         TRAMA_sendMessageToSocket(element->fd, 0x05, sizeOfBuf, message);
         pthread_mutex_unlock(&myMutex);
-        usleep(1000); 
+        usleep(1); 
     }
     close(fd2);
 

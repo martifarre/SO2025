@@ -15,6 +15,8 @@
 #define MEDIA 0
 #define TEXT 1
 
+#define WORKER_FILE "worker_count"
+
 // Variable global para almacenar la configuración
 WorkerConfig config;
 
@@ -59,10 +61,9 @@ void free_config() {
 }
 
 void read_from_msq(LinkedList2 listW, int type) {
-    printf("[DEBUG] Iniciando `read_from_msq` con type=%d\n", type);
+    write(STDOUT_FILENO, "[DEBUG] Iniciando `read_from_msq`...\n", 37);
 
     key_t key = ftok("worker.c", type);
-    printf("[DEBUG] Clave generada: %d\n", key);
 
     int msqid = msgget(key, IPC_CREAT | 0666);
     if (msqid == -1) {
@@ -70,31 +71,22 @@ void read_from_msq(LinkedList2 listW, int type) {
         return;
     }
 
-    printf("[DEBUG] Cola de mensajes obtenida con ID: %d\n", msqid);
-
     MessageQueueElement msg;
     while (1) {
-        printf("[DEBUG] Esperando mensajes en la cola...\n");
+
         if (msgrcv(msqid, &msg, sizeof(MessageQueueElement) - sizeof(long), 0, IPC_NOWAIT) == -1) {
             if (errno == ENOMSG) {
-                printf("[DEBUG] No hay más mensajes en la cola.\n");
+                write(STDOUT_FILENO, "[DEBUG] No hay más mensajes en la cola.\n", 40);
                 break;
             } else {
                 perror("[ERROR] msgrcv failed");
             }
         } else {
-            printf("[DEBUG] Mensaje recibido:\n");
-            printf("        Filename: %s\n", msg.filename);
-            printf("        Username: %s\n", msg.username);
-            printf("        Worker Type: %s\n", msg.worker_type);
-            printf("        Factor: %s\n", msg.factor);
-            printf("        Status: %d\n", msg.status);
-            printf("        MD5SUM: %s\n", msg.MD5SUM);
-            printf("        Directory: %s\n", msg.directory);
-            printf("        Bytes written F1: %d\n", msg.bytes_writtenF1);
-            printf("        Bytes to write F1: %d\n", msg.bytes_to_writeF1);
-            printf("        Bytes written F2: %d\n", msg.bytes_writtenF2);
-            printf("        Bytes to write F2: %d\n", msg.bytes_to_writeF2);
+            // Verificar si los campos clave son válidos
+            if (msg.filename[0] == '\0' || msg.username[0] == '\0' || msg.worker_type[0] == '\0') {
+                continue; // Ignorar este mensaje y continuar con el siguiente
+            }
+            write(STDOUT_FILENO, "[DEBUG] Mensaje recibido de la cola.\n", 37);
 
             listElement2* newWorker = malloc(sizeof(listElement2));
             if (!newWorker) {
@@ -117,8 +109,9 @@ void read_from_msq(LinkedList2 listW, int type) {
             newWorker->thread_id = msg.thread_id;
             newWorker->status = msg.status;
 
-            printf("[DEBUG] Nuevo elemento creado y agregado a la LinkedList.\n");
+            
             LINKEDLIST2_add(listW, newWorker);
+            write(STDOUT_FILENO, "[DEBUG] Mensaje añadido a la lista.\n", 36);
         }
     }
 
@@ -126,18 +119,16 @@ void read_from_msq(LinkedList2 listW, int type) {
     struct msqid_ds buf;  
     msgctl(msqid, IPC_STAT, &buf);
     if (buf.msg_qnum == 0) { // Solo eliminar si ya no hay mensajes
-        printf("[DEBUG] Cerrando todos los descriptores abiertos...\n");
-
         // Intentar cerrar la cola antes de eliminarla
         if (msgctl(msqid, IPC_RMID, NULL) == 0) {
-            printf("[DEBUG] Cola de mensajes eliminada correctamente.\n");
+            write(STDOUT_FILENO, "[DEBUG] Cola de mensajes eliminada.\n", 36);
         } else {
             perror("[ERROR] No se pudo eliminar la cola");
         }
     } else {
-        printf("[WARNING] La cola aún tiene mensajes, no se eliminó.\n");
+        write(STDOUT_FILENO, "[WARNING] La cola aún tiene mensajes, no se eliminó.\n", 53);
     }
-    printf("[DEBUG] Terminando `read_from_msq`\n");
+    write(STDOUT_FILENO, "[DEBUG] `read_from_msq` finalizado.\n", 36);
 }
 
 void send_to_msq(listElement2* element, int workerType) {
@@ -146,18 +137,15 @@ void send_to_msq(listElement2* element, int workerType) {
         return;
     }
 
-    printf("[DEBUG] Iniciando `send_to_msq` con workerType=%d\n", workerType);
+    write(STDOUT_FILENO, "[DEBUG] Iniciando `send_to_msq`...\n", 35);
 
     key_t key = ftok("worker.c", workerType);
-    printf("[DEBUG] Clave generada: %d\n", key);
 
     int msqid = msgget(key, IPC_CREAT | 0666);
     if (msqid == -1) {
         perror("[ERROR] Error creating/getting message queue");
         return;
     }
-
-    printf("[DEBUG] Cola de mensajes obtenida con ID: %d\n", msqid);
 
     MessageQueueElement msg;
     memset(&msg, 0, sizeof(MessageQueueElement));
@@ -190,18 +178,7 @@ void send_to_msq(listElement2* element, int workerType) {
     msg.thread_id = element->thread_id;
     msg.status = element->status;
 
-    printf("[DEBUG] Enviando mensaje a la cola:\n");
-    printf("        Filename: %s\n", msg.filename);
-    printf("        Username: %s\n", msg.username);
-    printf("        Worker Type: %s\n", msg.worker_type);
-    printf("        Factor: %s\n", msg.factor);
-    printf("        Status: %d\n", msg.status);
-    printf("        MD5SUM: %s\n", msg.MD5SUM);
-    printf("        Directory: %s\n", msg.directory);
-    printf("        Bytes written F1: %d\n", msg.bytes_writtenF1);
-    printf("        Bytes to write F1: %d\n", msg.bytes_to_writeF1);
-    printf("        Bytes written F2: %d\n", msg.bytes_writtenF2);
-    printf("        Bytes to write F2: %d\n", msg.bytes_to_writeF2);
+    write(STDOUT_FILENO, "[DEBUG] Enviando mensaje a la cola...\n", 38);
 
     if (msgsnd(msqid, &msg, sizeof(MessageQueueElement) - sizeof(long), 0) == -1) {
         perror("[ERROR] Error sending message to queue");
@@ -210,15 +187,91 @@ void send_to_msq(listElement2* element, int workerType) {
     }
 }
 
+// Crear o asegurar el archivo necesario para ftok
+void ensure_worker_file_exists() {
+    if (access(WORKER_FILE, F_OK) == -1) {
+        // El archivo no existe, lo creamos
+        FILE *f = fopen(WORKER_FILE, "w");
+        if (f == NULL) {
+            perror("[ERROR] Cannot create worker_count file");
+            exit(1);
+        }
+        fclose(f);
+    }
+}
+
+// Crear o obtener la MSQ
+int get_worker_count_msq() {
+    ensure_worker_file_exists(); // Asegurar que el archivo existe
+
+    key_t key = ftok(WORKER_FILE, 1); // Clave única basada en el archivo
+    if (key == -1) {
+        perror("[ERROR] ftok failed");
+        exit(1);
+    }
+
+    int msqid = msgget(key, IPC_CREAT | 0666);
+    if (msqid == -1) {
+        perror("[ERROR] Error creating/getting worker count MSQ");
+        exit(1);
+    }
+    return msqid;
+}
+
+void increment_worker_count() {
+    int msqid = get_worker_count_msq();
+    struct {
+        long message_type;
+    } msg = {1}; // Mensaje genérico con tipo 1
+
+    if (msgsnd(msqid, &msg, sizeof(msg) - sizeof(long), 0) == -1) {
+        perror("[ERROR] increment_worker_count: msgsnd failed");
+    } 
+}
+
+void decrement_worker_count() {
+    int msqid = get_worker_count_msq();
+    struct {
+        long message_type;
+    } msg;
+
+    if (msgrcv(msqid, &msg, sizeof(msg) - sizeof(long), 1, 0) == -1) {
+        perror("[ERROR] decrement_worker_count: msgrcv failed");
+    } 
+}
+
+int get_worker_count() {
+    int msqid = get_worker_count_msq();
+    struct msqid_ds buf;
+    if (msgctl(msqid, IPC_STAT, &buf) == -1) {
+        perror("[ERROR] get_worker_count: msgctl failed");
+        return 0;
+    }
+    return buf.msg_qnum; // Número de mensajes en la cola
+}
+
+void delete_worker_count_msq() {
+    int msqid = get_worker_count_msq();
+    if (msgctl(msqid, IPC_RMID, NULL) == -1) {
+        perror("[ERROR] delete_worker_count_msq: msgctl failed");
+    } 
+}
+
 void* distortFileThread(void* arg) {
     listElement2* element = (listElement2*)arg;
     if (element == NULL) {
-        write(STDOUT_FILENO, "Error: NULL element received in distortFileThread.\n", 52);
+        write(STDOUT_FILENO, "[ERROR] distortFileThread: NULL element received.\n", 50);
         return NULL;
     }
 
-    element->thread_id = pthread_self(); 
-    if (DISTORSION_distortFile(element, stop_signal) == 0) {
+    // Asignar el ID del hilo actual
+    element->thread_id = pthread_self();
+    write(STDOUT_FILENO, "[DEBUG] distortFileThread: Thread started.\n", 43);
+    int i = 0;
+    i = DISTORSION_distortFile(element, stop_signal);
+    // Llamar a la función de distorsión
+    if (i == 0 || i == 2) {
+        // Determinar la lista objetivo
         LinkedList2 targetList = (strcmp(element->worker_type, "Media") == 0) ? listH : listE;
         if (!LINKEDLIST2_isEmpty(targetList)) {
             LINKEDLIST2_goToHead(targetList);
@@ -226,23 +279,29 @@ void* distortFileThread(void* arg) {
                 listElement2* current = LINKEDLIST2_get(targetList);
                 if (current == element) {
                     LINKEDLIST2_remove(targetList);
+                    write(STDOUT_FILENO, "[DEBUG] distortFileThread: Element removed from list.\n", 54);
 
+                    // Liberar memoria asociada al elemento
                     free(element->fileName);
                     free(element->username);
                     free(element->worker_type);
                     free(element->factor);
                     free(element->MD5SUM);
                     free(element->directory);
-                    
-                    free(element);  
+                    free(element);
+
                     break;
                 }
                 LINKEDLIST2_next(targetList);
             }
+        } else {
+            write(STDOUT_FILENO, "[DEBUG] distortFileThread: List is empty, nothing to remove.\n", 61);
         }
     } else {
-        write(STDOUT_FILENO, "Error: Distortion failed.\n", 27);
+        write(STDOUT_FILENO, "[ERROR] distortFileThread: Distortion failed.\n", 46);
     }
+
+    write(STDOUT_FILENO, "[DEBUG] distortFileThread: Thread exiting.\n\n", 44);
     return NULL;
 }
 
@@ -312,8 +371,6 @@ void initServer() {
             LINKEDLIST2_goToHead(targetList);
             while (!LINKEDLIST2_isAtEnd(targetList)) {
                 listElement2* element = LINKEDLIST2_get(targetList);
-                printf("Filename element: %s, filaname: %s\n", element->fileName, fileName);
-                printf("Username element: %s, username: %s\n", element->username, userName);
                 if (strcmp(element->fileName, fileName) == 0 && strcmp(element->username, userName) == 0) {
                     existingElement = element;
                     existingElement->fd = fleckSock;
@@ -373,26 +430,40 @@ void doLogout() {
     LinkedList2 targetList = (strcmp(config.worker_type, "Media") == 0) ? listH : listE;
 
     if (!LINKEDLIST2_isEmpty(targetList)) {
+        write(STDOUT_FILENO, "List not empty...\n", 19);
         LINKEDLIST2_goToHead(targetList);
         while (!LINKEDLIST2_isAtEnd(targetList)) {
             listElement2* element = LINKEDLIST2_get(targetList);
-
-            if (element->fd > 0) {
-                if(element->status != 1) {
+            write(STDOUT_FILENO, "Stopping thread...\n", 20);
+            if (element->fd >= 0) {
+                write(STDOUT_FILENO, "Closing fleck socket...\n", 25);
+                if (element->status != 1) {
+                    write(STDOUT_FILENO, "[DEBUG] doLogout: Sending CON_KO message to Fleck socket...\n", 60);
                     TRAMA_sendMessageToSocket(element->fd, 0x07, (int16_t)strlen("CON_KO"), "CON_KO");
                 }
                 close(element->fd);
                 element->fd = -1;
+                write(STDOUT_FILENO, "[DEBUG] doLogout: Worker socket closed.\n", 40);
             }
+            write(STDOUT_FILENO, "Stopping thread...\n", 19);
 
             if (element->thread_id != 0) {
                 pthread_join(element->thread_id, NULL); 
             }
             
-            if(strcmp(config.worker_type, "Media") == 0) {
-                send_to_msq(element, MEDIA);
-            } else if(strcmp(config.worker_type, "Text") == 0) {
-                send_to_msq(element, TEXT);
+            // Verificar si es el último Worker conectado
+            int worker_count = get_worker_count();
+            if (worker_count == 1) {
+                delete_worker_count_msq(); // Eliminar la cola de mensajes
+                write(STDOUT_FILENO, "[DEBUG] Last Worker disconnecting. Deleting MSQ.\n", 49);
+            } else {
+                if (strcmp(config.worker_type, "Media") == 0 && element->status == 2) {
+                    send_to_msq(element, MEDIA);
+                } else if (strcmp(config.worker_type, "Text") == 0 && element->status == 2) {
+                    send_to_msq(element, TEXT);
+                }
+                decrement_worker_count(); // Reducir el contador de Workers
+                write(STDOUT_FILENO, "[DEBUG] Other Workers still connected. Decrementing count.\n", 59);
             }
 
             LINKEDLIST2_remove(targetList);
@@ -404,6 +475,15 @@ void doLogout() {
             free(element->MD5SUM);
             free(element->directory);
             free(element);
+        }
+    } else {
+        int worker_count = get_worker_count();
+        if (worker_count == 1) {
+            write(STDOUT_FILENO, "[DEBUG] Last Worker disconnecting. Deleting MSQ.\n", 49);
+            delete_worker_count_msq();
+        } else {
+            write(STDOUT_FILENO, "[DEBUG] Other Workers still connected. Decrementing count.\n", 59);
+            decrement_worker_count();
         }
     }
 
@@ -425,30 +505,29 @@ void CTRLC(int signum) {
 }
 
 void *connection_watcher() {
+    write(STDOUT_FILENO, "[DEBUG] connection_watcher: Started watching connection...\n", 59);
+
     while (1) {
         if (!SOCKET_isSocketOpen(sockfd)) {
-            write(STDOUT_FILENO, "Connection to Gotham lost\n", 27);
+            write(STDOUT_FILENO, "[DEBUG] connection_watcher: Connection to Gotham lost.\n", 55);
             close(sockfd);
-            while(1) {
-                if(!SOCKET_isSocketOpen(fleckSock)) {
+
+            // Entramos en bucle para revisar el fleckSock
+            while (1) {
+                if (!SOCKET_isSocketOpen(fleckSock)) {
+                    write(STDOUT_FILENO, "[DEBUG] connection_watcher: Fleck socket closed too. Calling CTRLC...\n", 70);
                     CTRLC(0);
-                }
+                } 
+                sleep(1); // Evitar bucle ultra-rápido consumiendo CPU
             }
-
-
-
-
-
-
-
-
-
-
-        }
+        } 
         sleep(5); // Verifica cada 5 segundos
     }
+
+    write(STDOUT_FILENO, "[DEBUG] connection_watcher: Exiting thread.\n", 44);
     return NULL;
 }
+
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
@@ -486,6 +565,8 @@ int main(int argc, char *argv[]) {
     TRAMA_sendMessageToSocket(sockfd, 0x02, (int16_t)strlen(data), data);    
     free(data);
 
+    increment_worker_count();
+    int a = get_worker_count();
     struct trama wtrama;
     if(TRAMA_readMessageFromSocket(sockfd, &wtrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);

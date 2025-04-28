@@ -91,17 +91,24 @@ int SOCKET_createSocket(char *incoming_Port, char* incoming_IP) {
 int SOCKET_isSocketOpen(int sockfd) {
     char buffer[1];
     int flags = fcntl(sockfd, F_GETFL);
-    if (flags == -1 && errno == EBADF) {
-        return 0; // Descriptor no válido (socket cerrado)
+    if (flags == -1) {
+        if (errno == EBADF) {
+            return 0; // Descriptor no válido (cerrado)
+        }
+        // Otro error raro, asumimos que está roto
+        return 0;
     }
 
-    // Intentar leer sin bloquear
     int result = recv(sockfd, buffer, sizeof(buffer), MSG_PEEK | MSG_DONTWAIT);
     if (result == 0) {
-        return 0; // Socket cerrado por el otro extremo
-    } else if (result < 0 && (errno == ECONNRESET || errno == ENOTCONN)) {
-        return 0; // Conexión reseteada o no conectada
+        return 0; // El otro extremo cerró la conexión
+    } else if (result < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return 1; // No hay datos, pero la conexión sigue viva
+        }
+        // Otros errores => conexión rota
+        return 0;
     }
 
-    return 1; // Socket abierto
+    return 1; // Todo bien, conexión viva
 }

@@ -13,6 +13,7 @@
 #include "files.h"
 #include "distorsion.h"
 #include "so_compression.h"
+#include "socket.h"
 #include <errno.h>
 #include <ctype.h>
 #include <sys/ipc.h>

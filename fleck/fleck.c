@@ -89,7 +89,6 @@ int connectToGotham() {
     return 1;
 }
 
-
 int realFileDistorsion(int sockfd, char* fileName, char* fileSize, listElement2* element) {
     // Crear path del archivo
     char* path = NULL;
@@ -110,22 +109,15 @@ int realFileDistorsion(int sockfd, char* fileName, char* fileSize, listElement2*
 
     element->bytes_to_writeF1 = atoi(fileSize);
 
-    int bytes_written = element->bytes_writtenF1, bytes_to_write = element->bytes_to_writeF1;
+    int bytes_written = 0, bytes_to_write = element->bytes_to_writeF1;
+    element->bytes_writtenF1 = bytes_written;
     char* buf = (char*)malloc(sizeof(char) * 247);
     char* message = (char*)malloc(sizeof(char) * 256);
     struct trama ftrama;
     int sizeOfBuf = 0;
-    printf("Bytes to write: %d\n", bytes_to_write);
-    printf("Bytes written: %d\n", bytes_written);
-    printf("Status: %d\n", element->status);
 
 
     if(element->status == 0 || element->status == 1) {
-
-        if (bytes_written > 0) {
-            lseek(fd, bytes_written, SEEK_SET);
-            printf("[DEBUG] Saltando %d bytes, comenzando desde la posición correcta.\n", bytes_written);
-        }
         element->status = 1;
         while (bytes_to_write > bytes_written) {
             memset(buf, '\0', 247);
@@ -142,7 +134,7 @@ int realFileDistorsion(int sockfd, char* fileName, char* fileSize, listElement2*
             int check = recv(sockfd, &test, 1, MSG_PEEK | MSG_DONTWAIT);
 
             if (check == 0) {  // 🔹 El worker ha cerrado la conexión
-                printf("[ERROR] Worker ha cerrado la conexión.\n");
+                write(STDOUT_FILENO, "Worker connection closed.\n", 26);
                 pthread_mutex_unlock(&myMutex);
                 return 0;
             } else if (check < 0 && errno != EWOULDBLOCK && errno != EAGAIN) {
@@ -151,11 +143,11 @@ int realFileDistorsion(int sockfd, char* fileName, char* fileSize, listElement2*
                 return 0;
             }
 
-            // 🔹 Enviar datos al worker (sin modificar `TRAMA_sendMessageToSocket()`)
+            // 🔹 Enviar datos al worker (sin modificar TRAMA_sendMessageToSocket())
             TRAMA_sendMessageToSocket(sockfd, 0x03, sizeOfBuf, message);
 
             pthread_mutex_unlock(&myMutex);
-            usleep(1000);
+            usleep(1);
         }
         element->status = 2;
 
@@ -182,7 +174,7 @@ int realFileDistorsion(int sockfd, char* fileName, char* fileSize, listElement2*
     if(element->status == 2) {
 
         if (TRAMA_readMessageFromSocket(sockfd, &ftrama) < 0) {
-            write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);
+            write(STDOUT_FILENO, "Error: Checksum not validated. 2\n", 32);
             return 1;
         } else if (ftrama.tipo != 0x04 && ftrama.tipo != 0x07) {
             write(STDOUT_FILENO, "Error: Invalid trama type. 2\n", 29);
@@ -200,6 +192,18 @@ int realFileDistorsion(int sockfd, char* fileName, char* fileSize, listElement2*
 
     char* path2 = NULL;
     if (asprintf(&path2, "%s/D%s", config.directory, fileName) == -1) return 1;
+    
+    
+    // Verificar si el archivo ya existe y eliminarlo
+    if (access(path2, F_OK) == 0) { // F_OK verifica si el archivo existe
+        if (remove(path2) == 0) {
+            write(STDOUT_FILENO, "Existing file deleted successfully.\n", 36);
+        } else {
+            perror("Failed to delete existing file");
+            free(path2);
+            return 1;
+        }
+    }    
 
     int fd2 = open(path2, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fd2 < 0) {
@@ -207,9 +211,7 @@ int realFileDistorsion(int sockfd, char* fileName, char* fileSize, listElement2*
         exit(EXIT_FAILURE);
     }
 
-    int bytes_written2 = element->bytes_writtenF2, bytes_to_write2 = element->bytes_to_writeF2;
-    printf("Bytes to write: %d\n", bytes_to_write2);
-    printf("Bytes written: %d\n", bytes_written2);
+    int bytes_written2 = 0, bytes_to_write2 = element->bytes_to_writeF2;
     element->status = 3;
     while (bytes_written2 < bytes_to_write2) {
         if (TRAMA_readMessageFromSocket(sockfd, &ftrama) < 0) {
@@ -222,13 +224,18 @@ int realFileDistorsion(int sockfd, char* fileName, char* fileSize, listElement2*
             write(STDOUT_FILENO, "Error: Invalid trama type. 3\n", 29);
             return 1;
         }
+
         char* incoming_Info = NULL;
-        if (bytes_to_write2 - bytes_written2 < 247) {
+        if(bytes_written2 < element->bytes_writtenF2) {
+            bytes_written2 += 247;
+        } else if (bytes_to_write2 - bytes_written2 < 247) {
             incoming_Info = STRING_getSongCode((const char *)ftrama.data, bytes_to_write2 - bytes_written2);
             bytes_written2 += write(fd2, incoming_Info, bytes_to_write2 - bytes_written2);
+            element->bytes_writtenF2 = bytes_written2;
         } else {
             incoming_Info = STRING_getSongCode((const char *)ftrama.data, 247);
             bytes_written2 += write(fd2, incoming_Info, 247);
+            element->bytes_writtenF2 = bytes_written2;
         }
         if (bytes_written2 < 0) {
             perror("Failed to write to file.");
@@ -236,15 +243,10 @@ int realFileDistorsion(int sockfd, char* fileName, char* fileSize, listElement2*
         }
         free(incoming_Info);
         free(ftrama.data);
-        element->bytes_writtenF2 = bytes_written2;
-        usleep(1000);
+        usleep(1);
     }
 
     char* actualMd5 = DISTORSION_getMD5SUM(path2);
-    printf("Bytes written: %d\n", bytes_written2);
-    printf("Bytes to write: %d\n", bytes_to_write2);
-    printf("MD5SUM: %s\n", actualMd5);
-    printf("Distorted MD5SUM: %s\n", element->distortedMd5);
 
     if (strcmp(element->distortedMd5, actualMd5) == 0) {
         TRAMA_sendMessageToSocket(sockfd, 0x06, (int16_t)strlen("CHECK_OK"), "CHECK_OK");
@@ -254,7 +256,7 @@ int realFileDistorsion(int sockfd, char* fileName, char* fileSize, listElement2*
         write(STDOUT_FILENO, "Error: File could not be distorted.\n\n", 37);
     }
 
-    remove(path2);
+    //remove(path2);
     close(fd2);
     free(path);
     free(path2);
@@ -319,7 +321,6 @@ void distortFile (char* type, char* filename, char* factor, listElement2* elemen
 
     char* data = NULL;
     char* filename_copy = strdup(filename); 
-    printf("Filename: %s\n", filename_copy);
     if (asprintf(&data, "%s&%s", type, filename_copy) == -1) return;
     write(STDOUT_FILENO, data, strlen(data));
     TRAMA_sendMessageToSocket(sockfd_G, 0x10, (int16_t)strlen(data), data);
@@ -334,6 +335,7 @@ void distortFile (char* type, char* filename, char* factor, listElement2* elemen
         if(strcmp((const char *)ftrama.data, "DISTORT_KO") == 0) {
             write(STDOUT_FILENO, "ERROR: No worker for this type available.\n", 43);
             free(ftrama.data);
+            ongoing_media_distortion = 0;
         } else {
             char *port = STRING_getXFromMessage((const char *)ftrama.data, 1);
             char *ip = STRING_getXFromMessage((const char *)ftrama.data, 0);
@@ -409,13 +411,12 @@ void doLogout () {
         write(STDOUT_FILENO, "Sending logout message to Gotham server...\n", 43);
     }
     if (SOCKET_isSocketOpen(sockfd_H)) {
-        write(STDOUT_FILENO, "Sending logout message to Worker server...\n", 43);
-        TRAMA_sendMessageToSocket(sockfd_H, 0x07, (int16_t)strlen("CON_KO"), "CON_KO"); 
+        shutdown(sockfd_H, SHUT_WR);
         close(sockfd_H);
         sockfd_H = -1;
     }
     if(SOCKET_isSocketOpen(sockfd_E)) {
-        write(STDOUT_FILENO, "Sending logout message to Worker server...\n", 43);
+        write(STDOUT_FILENO, "Sending logout message to Enigma server...\n", 43);
         TRAMA_sendMessageToSocket(sockfd_E, 0x07, (int16_t)strlen("CON_KO"), "CON_KO"); 
         close(sockfd_E);
         sockfd_E = -1;
@@ -440,17 +441,57 @@ void CTRLC(int signum) {
 void *connection_watcher() {
     while (connected) { // Solo verifica mientras esté conectado
         if (!SOCKET_isSocketOpen(sockfd_G)) {
-            write(STDOUT_FILENO, "Connection to Gotham lost\n", 27);
+            write(STDOUT_FILENO, "Connection to Gotham server lost.\n", 34);
             connected = 0;
             close(sockfd_G);
-            while(1) {
-                if(!SOCKET_isSocketOpen(sockfd_E) || !SOCKET_isSocketOpen(sockfd_H)) {
-                    CTRLC(0);
+
+            // Verificar si hay distorsiones en curso
+            int distortions_in_progress = 1;
+            while (distortions_in_progress) {
+                distortions_in_progress = 0;
+
+                pthread_mutex_lock(&myMutex); // Proteger el acceso a la lista
+                if (!LINKEDLIST2_isEmpty(distortionsList)) {
+                    LINKEDLIST2_goToHead(distortionsList);
+                    while (!LINKEDLIST2_isAtEnd(distortionsList)) {
+                        listElement2* element = LINKEDLIST2_get(distortionsList);
+                        if (element->status != 4) { // Si no está completada
+                            distortions_in_progress = 1;
+                            break;
+                        }
+                        LINKEDLIST2_next(distortionsList);
+                    }
+                }
+                pthread_mutex_unlock(&myMutex);
+
+                if (distortions_in_progress) {
+                    write(STDOUT_FILENO, "Waiting for distortions to finish...\n", 37);
+                    sleep(1); // Esperar un segundo antes de volver a verificar
                 }
             }
-        }
-        sleep(5); // Verifica cada 5 segundos
+
+            // Cerrar los sockets de los Workers
+        
+            if (SOCKET_isSocketOpen(sockfd_E)) {
+                write(STDOUT_FILENO, "Closing Enigma worker socket...\n", 32);
+                close(sockfd_E);
+                sockfd_E = -1;
+            }
+            if (SOCKET_isSocketOpen(sockfd_H)) {
+                write(STDOUT_FILENO, "Closing Gotham worker socket...\n", 32);
+                close(sockfd_H);
+                sockfd_H = -1;
+            }
+
+            // Llamar a CTRLC para manejar la desconexión
+            write(STDOUT_FILENO, "CTRL+C signal sent to main thread.\n", 35);
+            CTRLC(0);
+            break;
+        } 
+
+        sleep(5); // Esperar antes de volver a verificar
     }
+
     return NULL;
 }
 
@@ -547,7 +588,9 @@ void terminal() {
             } else {
                 if(connectToGotham()) {
                     connected = 1;
-                    if(pthread_create(&watcher_thread, NULL, connection_watcher, NULL) != 0) {
+                    write(STDOUT_FILENO, "Connected to Gotham\n", 20);
+                    // Lanzar el connection_watcher
+                    if (pthread_create(&watcher_thread, NULL, connection_watcher, NULL) != 0) {
                         write(STDOUT_FILENO, "Error: Cannot create thread\n", 29);
                     } else {
                         pthread_detach(watcher_thread);
@@ -590,6 +633,7 @@ void terminal() {
                     newElement->bytes_writtenF2 = 0;
                     newElement->bytes_to_writeF1 = 0;
                     newElement->bytes_to_writeF2 = 0;
+
 
                     // Agregarlo a la LinkedList
                     LINKEDLIST2_add(distortionsList, newElement);

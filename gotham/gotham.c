@@ -29,7 +29,6 @@ int fleck_connecter_fd = -1, worker_connecter_fd = -1;
 int pipefd[2];
 
 
-
 void free_config() {
     free(config.fleck_server_ip);
     free(config.fleck_server_port); // Liberar la memoria del puerto
@@ -41,6 +40,7 @@ int i = 0;
 
 // Function to log an event (used by Gotham process)
 void log_event(const char *event) {
+    write(STDOUT_FILENO, event, strlen(event));
     char timestamped_event[256];
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
@@ -422,42 +422,55 @@ void* funcThreadWorkerConnecter() {
 }
 
 void doLogout() {
-    gotham_flag = 1;
+    gotham_flag = 1; // Indicar que Gotham está cerrando
 
+    // Procesar la lista de conexiones de Fleck
+    write(STDOUT_FILENO, "[DEBUG] doLogout: Processing Fleck connections...\n", 50);
     LINKEDLIST_goToHead(listF);
-    while(!LINKEDLIST_isAtEnd(listF)) {
+    while (!LINKEDLIST_isAtEnd(listF)) {
         listElement* currentElement = LINKEDLIST_get(listF);
-        write(currentElement->sockfd, "OUT", 3);
-        printf("Unlocking socket fleck %d, \n", currentElement->sockfd);
+
+        // Cerrar el socket de manera ordenada
         shutdown(currentElement->sockfd, SHUT_WR);
         close(currentElement->sockfd);
-        pthread_join(currentElement->thread_id, NULL);
-        printf("Unlocked socket fleck %d, \n", currentElement->sockfd);
+        write(STDOUT_FILENO, "[DEBUG] doLogout: Shutting down Fleck socket...\n", 48);
+
+        // Detach el hilo asociado
+        pthread_detach(currentElement->thread_id);
+        write(STDOUT_FILENO, "[DEBUG] doLogout: Detaching thread for Fleck socket...\n", 55);
+
+        // Liberar memoria asociada al elemento
         free(currentElement->fleck_username);
         free(currentElement);
         LINKEDLIST_remove(listF);
-        //LINKEDLIST_next(listF);
+        write(STDOUT_FILENO, "[DEBUG] doLogout: Removed Fleck connection from list.\n", 54);
     }
 
+    // Procesar la lista de conexiones de Workers
+    write(STDOUT_FILENO, "[DEBUG] doLogout: Processing Worker connections...\n", 51);
     LINKEDLIST_goToHead(listW);
-    while(!LINKEDLIST_isAtEnd(listW)) {
+    while (!LINKEDLIST_isAtEnd(listW)) {
         listElement* currentElement = LINKEDLIST_get(listW);
-        write(currentElement->sockfd, "OUT", 3);
-        printf("Unlocking socket worker %d, \n", currentElement->sockfd);
+
+        // Cerrar el socket de manera ordenada
         shutdown(currentElement->sockfd, SHUT_WR);
         close(currentElement->sockfd);
-        pthread_join(currentElement->thread_id, NULL);
-        printf("Unlocking socket worker %d, \n", currentElement->sockfd);
+        write(STDOUT_FILENO, "[DEBUG] doLogout: Shutting down Worker socket...\n", 49);
+
+        // Detach el hilo asociado
+        pthread_detach(currentElement->thread_id);
+        write(STDOUT_FILENO, "[DEBUG] doLogout: Detaching thread for Worker socket...\n", 56);
+
+        // Liberar memoria asociada al elemento
         free(currentElement->ip);
         free(currentElement->port);
         free(currentElement->worker_type);
         free(currentElement);
-
         LINKEDLIST_remove(listW);
-        //LINKEDLIST_next(listW);
+        write(STDOUT_FILENO, "[DEBUG] doLogout: Removed Worker connection from list.\n", 55);
     }
 
-    
+    write(STDOUT_FILENO, "All connections closed.\n", 24);
 }
 
 void CTRLC(int signum) {
@@ -475,8 +488,6 @@ void CTRLC(int signum) {
     signal(SIGINT, SIG_DFL);
     raise(SIGINT);
 }
-
-
 
 // Signal handler for child process (Arkham)
 void signalHandlerArkham(int signum) {
@@ -548,8 +559,6 @@ int main(int argc, char *argv[]) {
         asprintf(&msg, "\nGotham server initialized.\nWaiting for connections...\n\n");
         print_text(msg);
         free(msg);
-        //delte later
-        log_event("Harley connected: IP:172.16.205.3:9869");
         listW = LINKEDLIST_create();
         listF = LINKEDLIST_create();
 
@@ -565,11 +574,6 @@ int main(int argc, char *argv[]) {
             write(STDOUT_FILENO, "Error: Cannot create thread\n", 29);
             return 1;
         }
-        
-        //delte later, place where the log_event is called
-        log_event("Harley connected: IP:172.16.205.3:9869");
-        log_event("Fleck connected: username=arthur");
-        log_event("Harley connected: IP:172.16.205.3:9870");
 
         if (pthread_join(thread_WorkerConnecter, NULL) != 0) {
             write(STDOUT_FILENO, "Error: Cannot join thread\n", 27);

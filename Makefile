@@ -62,3 +62,24 @@ h1:
 
 h2:
 	cd bin && valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes --track-origins=yes -s ./worker ../config/harley2.dat
+
+sg:
+	cd bin && ./gotham ../config/gotham.dat
+
+sg2:
+	cd bin && ./gotham ../config/gotham2.dat
+
+sf:
+	cd bin && ./fleck ../config/fleck.dat
+
+se1:
+	cd bin && ./worker ../config/enigma.dat
+
+se2:
+	cd bin && ./worker ../config/enigma2.dat
+
+sh1:
+	cd bin && ./worker ../config/harley.dat
+
+sh2:
+	cd bin && ./worker ../config/harley2.dat

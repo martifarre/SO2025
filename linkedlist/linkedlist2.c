@@ -148,7 +148,7 @@ LinkedList2 LINKEDLIST2_create () {
  ****************************************************************************/
 void 	LINKEDLIST2_add (LinkedList2 list, Element2 element) {
 	if (element == NULL) {
-		printf("[ERROR] Intento de agregar un elemento NULL a la lista.\n");
+		write(STDERR_FILENO, "[ERROR] Attempt to add a NULL element to the list.\n", 51);
 		return;
 	}
 	// 1- Create a new node to store the new element.
@@ -396,13 +396,10 @@ void LINKEDLIST2_shuffle(LinkedList2 list) {
  ****************************************************************************/
  void LINKEDLIST2_destroy(LinkedList2* list) {
     if (list == NULL || *list == NULL) {
-        printf("[DEBUG] La lista ya es NULL. No hay nada que liberar.\n");
-        fflush(stdout);
         return;
     }
 
-    printf("[DEBUG] Iniciando destrucción de la LinkedList...\n");
-    fflush(stdout);
+
 
     Node* aux;
     int node_count = 0;
@@ -412,35 +409,27 @@ void LINKEDLIST2_shuffle(LinkedList2 list) {
         (*list)->head = (*list)->head->next;
         node_count++;
 
-        printf("[DEBUG] Liberando nodo #%d en dirección %p...\n", node_count, (void*)aux);
-        fflush(stdout);
 
         if (aux->element) {
-            free(aux->element->fileName);
-            free(aux->element->username);
-            free(aux->element->worker_type);
-            free(aux->element->factor);
-            free(aux->element->MD5SUM);
-            free(aux->element->distortedMd5);
-            free(aux->element->directory);
+            if (aux->element->fileName) free(aux->element->fileName);
+            if (aux->element->username) free(aux->element->username);
+            if (aux->element->worker_type) free(aux->element->worker_type);
+            if (aux->element->factor) free(aux->element->factor);
+            if (aux->element->MD5SUM) free(aux->element->MD5SUM);
+            if (aux->element->distortedMd5) free(aux->element->distortedMd5);
+            if (aux->element->directory) free(aux->element->directory);
             free(aux->element);
         } else {
-            printf("[WARNING] aux->element es NULL en nodo #%d, no se libera.\n", node_count);
-            fflush(stdout);
         }
 
         free(aux);
     }
-
-    printf("[DEBUG] La LinkedList ha sido destruida. Liberando la estructura de la lista...\n");
-    fflush(stdout);
 
     (*list)->head = NULL;
     (*list)->previous = NULL;
     free(*list);
     *list = NULL;
 
-    printf("[DEBUG] LinkedList2 completamente eliminada.\n");
     fflush(stdout);
 }
 

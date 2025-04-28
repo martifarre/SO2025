@@ -48,12 +48,12 @@ void FILES_list_files(const char *directory, const char *label) {
     closedir(dir);
 
     asprintf(&buffer, "There are %d %s available:\n", count, label);
-    printf("%s", buffer);
+    write(STDOUT_FILENO, buffer, strlen(buffer));
     free(buffer);
 
     for (int i = 0; i < count; i++) {
         asprintf(&buffer, "%d. %s\n", i + 1, file_list[i]);
-        printf("%s", buffer);
+        write(STDOUT_FILENO, buffer, strlen(buffer));
         free(buffer);
         free(file_list[i]);
     }

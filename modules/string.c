@@ -19,13 +19,13 @@ char *STRING_readUntil(int fd, char cEnd) {
     int i = 0;
     ssize_t chars_read;
     char c = 0;
-    char *buffer = NULL;
+    char *buffer = NULL, *temp = NULL;
 
     while (1) {
         chars_read = read(fd, &c, sizeof(char));  
         if (chars_read == 0) {         
             if (i == 0) {              
-                return NULL;
+                return NULL;  // No hay nada que leer, retorna NULL sin alocar memoria
             }
             break;                     
         } else if (chars_read < 0) {   
@@ -36,13 +36,20 @@ char *STRING_readUntil(int fd, char cEnd) {
         if (c == cEnd) {              
             break;
         }
-        buffer = (char *)realloc(buffer, i + 2);
+
+        temp = (char *)realloc(buffer, i + 2); // Se usa `temp` para verificar si `realloc` falla
+        if (!temp) {  // Si `realloc` falla, liberar memoria y retornar NULL
+            free(buffer);
+            return NULL;
+        }
+        buffer = temp;  
         buffer[i++] = c;                
     }
 
     buffer[i] = '\0';  // Terminar la cadena con un carácter nulo
     return buffer;
 }
+
 
 
 int STRING_count_words(char *str) {
