@@ -1,3 +1,12 @@
+/***********************************************
+*
+* @Proposito: Declaracion de funciones para procesamiento
+*             de tramas
+* @Autor/es: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
+* @Data creacion: 12/10/2024
+* @Data ultima modificacion: 18/05/2025
+*
+************************************************/
 #ifndef TRAMA_H
 #define TRAMA_H
 

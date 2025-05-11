@@ -1,7 +1,11 @@
-/*
-* Operating Systems - Compression Project
-* Year 2024-25
-*/
+/***********************************************
+*
+* @Proposito:  Declara funciones y constantes para la compresión de imágenes y audio
+* @Autor/es: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
+* @Data creacion: 12/10/2024
+* @Data ultima modificacion: 18/05/2025
+*
+************************************************/
 #ifndef _SO_COMPRESSION_H_
 #define _SO_COMPRESSION_H_
 

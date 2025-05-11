@@ -1,6 +1,25 @@
+/***********************************************
+*
+* @Proposito:  Implementa las funciones relacionadas con la distorsion de archivos
+*               y la compresion de texto
+* @Autor/es: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
+* @Data creacion: 12/10/2024
+* @Data ultima modificacion: 18/05/2025
+*
+************************************************/
 #define _GNU_SOURCE
 #include "distorsion.h"
-
+/**************************************************
+ *
+ * @Finalidad: Calcular el hash MD5 de un fichero
+ *             ejecutando la herramienta del sistema (md5sum)
+ *             y devolver su valor como cadena hexadecimal.
+ * @Parametros: in: path = ruta completa al fichero
+ *                         del cual se quiere obtener el MD5.
+ * @Retorno:    Puntero a una cadena dinámica (char*) con los
+ *             32 caracteres hexadecimales del MD5 sum. 
+ *
+ **************************************************/
 char* DISTORSION_getMD5SUM(const char* path) {
     int fds[2];
     pipe(fds);
@@ -33,7 +52,21 @@ char* DISTORSION_getMD5SUM(const char* path) {
         return md5sum;
     }
 }
-
+/**************************************************
+ *
+ * @Finalidad: Abrir y procesar un fichero de texto,
+ *             eliminando todas las palabras cuya longitud
+ *             sea menor que el umbral especificado, y
+ *             generar el fichero resultante con la reducción
+ *             de contenido.
+ * @Parametros: in: input_file_path = ruta al fichero de texto
+ *                                   que se va a distorsionar.
+ *              in: word_limit      = longitud mínima de palabra;
+ *                                  cualquier palabra más corta se elimina.
+ * @Retorno:    0 si la operación se completó correctamente;
+ *             <0 si ocurrió algún error.
+ *
+ **************************************************/
 int DISTORSION_compressText(char *input_file_path, int word_limit) {
     if (word_limit <= 0) {
         return ERROR_INVALID_LIMIT; // El límite debe ser mayor que 0
@@ -128,7 +161,23 @@ int DISTORSION_compressText(char *input_file_path, int word_limit) {
     return NO_ERROR; // Todo salió bien
 }
 
-
+/**************************************************
+ *
+ * @Finalidad: Ejecutar la distorsión de un fichero
+ *             (imagen, audio o texto) representado por el elemento de la lista,
+ *             gestionando la transferencia de tramas, el procesamiento
+ *             con el factor indicado y respondiendo a señales de parada.
+ * @Parametros: in/out: element     = puntero a la estructura que contiene los metadatos
+ *                                 de la tarea (nombre de fichero, tamaño total,
+ *                                 MD5 original, factor de distorsión, socket,
+ *                                 desplazamiento de bytes, etc.).
+ *              in:     stop_signal = puntero a una sig atómica que, si se activa,
+ *                                 indica interrupción inmediata del proceso.
+ * @Retorno:    0 en caso de éxito completo;
+ *             <0 en caso de error (por ejemplo, fallo de E/S en socket,
+ *             error en el checksum, fallo de compresión o señal de parada).
+ *
+ **************************************************/
 int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_signal) {
     pthread_mutex_t myMutex = PTHREAD_MUTEX_INITIALIZER;
     char* path = NULL;

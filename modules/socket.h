@@ -1,3 +1,12 @@
+/***********************************************
+*
+* @Proposito: Declara funciones y constantes necesarias para la 
+*               creación, inicialización y gestión de sockets
+* @Autor/es: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
+* @Data creacion: 12/10/2024
+* @Data ultima modificacion: 18/05/2025
+*
+************************************************/
 #ifndef SOCKET_H
 #define SOCKET_H
 

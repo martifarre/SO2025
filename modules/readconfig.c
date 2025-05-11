@@ -1,6 +1,26 @@
+/***********************************************
+*
+* @Proposito:  Implementación de funciones para leer y
+*               gestionar fichero de configuración
+* @Autor/es: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
+* @Data creacion: 12/10/2024
+* @Data ultima modificacion: 18/05/2025
+*
+************************************************/
 #define _GNU_SOURCE
 #include "readconfig.h"
-
+/**************************************************
+ *
+ * @Finalidad: Leer y parsear el fichero de configuración
+ *             específico para el servidor Gotham.
+ * @Parametros: in: config_file = ruta al fichero de configuración
+ *                                (terminado en '\0') que contiene:
+ *                                - IP y puerto para conexiones de Fleck
+ *                                - IP y puerto para conexiones de Enigma/Harley
+ * @Retorno:    Estructura GothamConfig con los campos inicializados
+ *             (IPs y puertos) extraídos del fichero.
+ *
+ **************************************************/
 GothamConfig READCONFIG_read_config_gotham(const char *config_file) {
     GothamConfig config;
     memset(&config, 0, sizeof(GothamConfig)); 
@@ -46,7 +66,27 @@ GothamConfig READCONFIG_read_config_gotham(const char *config_file) {
     close(fd);
     return config;
 }
-
+/**************************************************
+ *
+ * @Finalidad: Leer y parsear el fichero de configuración
+ *             para un proceso trabajador (Enigma o Harley),
+ *             obteniendo los parámetros necesarios para:
+ *             - Conectarse a Gotham (IP y puerto).
+ *             - Abrir su propio socket de escucha (IP y puerto).
+ *             - Definir el directorio de trabajo donde guardar archivos.
+ *             - Identificar su tipo de worker (Media o Text).
+ * @Parametros: in: config_file = ruta al fichero de configuración
+ *                                 que contiene, en este orden:
+ *                                1. IP de Gotham
+ *                                2. Puerto de Gotham
+ *                                3. IP de escucha del worker
+ *                                4. Puerto de escucha del worker
+ *                                5. Ruta de la carpeta de trabajo
+ *                                6. Tipo de worker (Media o Text)
+ * @Retorno:    Estructura WorkerConfig con todos los campos inicializados
+ *             según el contenido del fichero.
+ *
+ **************************************************/
 WorkerConfig READCONFIG_read_config_worker(const char *config_file) {
     WorkerConfig config;
     memset(&config, 0, sizeof(WorkerConfig));
@@ -114,7 +154,22 @@ WorkerConfig READCONFIG_read_config_worker(const char *config_file) {
     close(fd);
     return config;
 }
-
+/**************************************************
+ *
+ * @Finalidad: Leer y parsear el fichero de configuración
+ *             para un proceso cliente Fleck, obteniendo los parámetros necesarios para:
+ *             - Identificar el nombre de usuario.
+ *             - Determinar la carpeta de trabajo del usuario.
+ *             - Conectar al servidor Gotham (IP y puerto).
+ * @Parametros: in: config_file = ruta al fichero de configuración
+ *                                que contiene, en este orden:
+ *                                1. Nombre de usuario
+ *                                2. Ruta de la carpeta de usuario
+ *                                3. IP del servidor Gotham
+ *                                4. Puerto del servidor Gotham
+ * @Retorno:    Estructura FleckConfig con todos los campos inicializados
+ *             según el contenido del fichero.
+ **************************************************/
 FleckConfig READCONFIG_read_config_fleck(const char *config_file) {
     FleckConfig config;
     memset(&config, 0, sizeof(FleckConfig));
@@ -131,7 +186,8 @@ FleckConfig READCONFIG_read_config_fleck(const char *config_file) {
         exit(1);
     }
     STRING_replace(config.username, '\r', '\0');
-
+    STRING_remove_char(config.username, '&');
+    
     if (config.username == NULL) {
         write(STDOUT_FILENO, "Error: Failed to read username\n", 31);
         close(fd);

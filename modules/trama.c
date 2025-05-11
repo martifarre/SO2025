@@ -1,6 +1,21 @@
+/***********************************************
+*
+* @Proposito: Implementa funciones para procesamiento
+*             de tramas en C
+* @Autor/es: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
+* @Data creacion: 12/10/2024
+* @Data ultima modificacion: 18/05/2025
+*
+************************************************/
 #define _GNU_SOURCE
 #include "trama.h"
-
+/**************************************************
+ *
+ * @Finalidad: Calcular el checksum de una trama .
+ * @Parametros: in: trama = puntero al buffer de bytes de la trama
+ * @Retorno:    Valor del checksum.
+ *
+ **************************************************/
 uint16_t TRAMA_calculate_checksum(const char *trama) {
     uint32_t sum = 0;
 
@@ -15,7 +30,21 @@ uint16_t TRAMA_calculate_checksum(const char *trama) {
     // Retornamos el complemento a uno del checksum
     return ~checksum;
 }
-
+/**************************************************
+ *
+ * @Finalidad: Leer del socket un una trama completa de 256 Bytes,
+ *             validar su checksum y extraer el contenido en la estructura destino.
+ * @Parametros: in:  sockfd = descriptor del socket conectado de donde se leerá la trama.
+ *              out: trama  = puntero a la estructura donde se guardarán los campos de la trama.
+ * @Retorno:    >0  = número de bytes leídos (debe coincidir con FRAME_SIZE) si la trama
+ *                 se recibió y validó correctamente.
+ *             ==0  = conexión cerrada (EOF).
+ *             <0  = error:
+ *                   -1 si falla la lectura del socket,
+ *                   -2 si el checksum no coincide,
+ *                   -3 en otros errores de validación o protocolo.
+ *
+ **************************************************/
 int TRAMA_readMessageFromSocket(int sockfd, struct trama *trama) {
     char buffer[256];
     int checksum = 0;
@@ -46,7 +75,7 @@ int TRAMA_readMessageFromSocket(int sockfd, struct trama *trama) {
     // Validar longitud de los datos
     if (trama->longitud > 247) {
         perror("Error: Invalid trama length");
-        free(trama->data);  // Liberar memoria antes de salir
+        free(trama->data);
         trama->data = NULL;
         return -1;
     }
@@ -78,7 +107,18 @@ int TRAMA_readMessageFromSocket(int sockfd, struct trama *trama) {
     return 1;  // Éxito
 }
 
-
+/**************************************************
+ *
+ * @Finalidad: Construir una trama con los campos especificados 
+ *             (tipo, longitud de datos, datos, checksum y timestamp)
+ *             y enviarla íntegramente al socket indicado.
+ * @Parametros: in: sockfd = descriptor del socket por el que se enviará la trama.
+ *              in: type   = código de tipo de trama.
+ *              in: size   = número de bytes válidos en el buffer 'data'.
+ *              in: data   = puntero al bloque de datos a incluir en la trama.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void TRAMA_sendMessageToSocket(int sockfd, char type, int16_t size, char *data) {
     char trama[256];
     memset(trama, '\0', 256);

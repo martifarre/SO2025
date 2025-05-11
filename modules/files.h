@@ -1,3 +1,11 @@
+/***********************************************
+*
+* @Proposito:  Declara funciones para la gestión y manipulación de archivos media/texto
+* @Autor/es: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
+* @Data creacion: 12/10/2024
+* @Data ultima modificacion: 18/05/2025
+*
+************************************************/
 #ifndef FILES_H
 #define FILES_H
 

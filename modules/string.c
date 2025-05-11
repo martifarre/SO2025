@@ -1,12 +1,10 @@
-// Ignacio Giral ignacio.giral
-// Marti Farre marti.farre
-
 /***********************************************
 *
-* @Proposito: Implementación del proceso Enigma
+* @Proposito: Implementa funciones para manipulación y procesamiento
+*               de cadenas de texto
 * @Autor/es: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
 * @Data creacion: 12/10/2024
-* @Data ultima modificacion: 17/10/2024
+* @Data ultima modificacion: 18/05/2025
 *
 ************************************************/
 #define _GNU_SOURCE
@@ -14,7 +12,17 @@
 
 #define N_LINES 16
 #define M_CHARS 16
-
+/**************************************************
+ *
+ * @Finalidad: Leer del descriptor de archivo dado todos los caracteres
+ *             hasta encontrar el carácter delimitador o el fin de archivo.
+ * @Parametros:     in: fd    = descriptor de archivo desde el que se leerá.
+ *                  in: cEnd  = carácter que marca el final de la lectura.
+ * @Retorno:    Puntero a una cadena dinámica (char*) terminada en '\0'
+ *              que contiene los caracteres leídos (sin incluir cEnd).
+ *              Devuelve NULL en caso de error o si no se leyó ningún dato.
+ *
+ **************************************************/
 char *STRING_readUntil(int fd, char cEnd) {
     int i = 0;
     ssize_t chars_read;
@@ -25,7 +33,7 @@ char *STRING_readUntil(int fd, char cEnd) {
         chars_read = read(fd, &c, sizeof(char));  
         if (chars_read == 0) {         
             if (i == 0) {              
-                return NULL;  // No hay nada que leer, retorna NULL sin alocar memoria
+                return NULL;
             }
             break;                     
         } else if (chars_read < 0) {   
@@ -37,8 +45,8 @@ char *STRING_readUntil(int fd, char cEnd) {
             break;
         }
 
-        temp = (char *)realloc(buffer, i + 2); // Se usa `temp` para verificar si `realloc` falla
-        if (!temp) {  // Si `realloc` falla, liberar memoria y retornar NULL
+        temp = (char *)realloc(buffer, i + 2);
+        if (!temp) {
             free(buffer);
             return NULL;
         }
@@ -46,12 +54,21 @@ char *STRING_readUntil(int fd, char cEnd) {
         buffer[i++] = c;                
     }
 
-    buffer[i] = '\0';  // Terminar la cadena con un carácter nulo
+    buffer[i] = '\0'; 
     return buffer;
 }
 
 
-
+/**************************************************
+ *
+ * @Finalidad: Contar cuántas palabras contiene una cadena,
+ *             considerando cualquier secuencia de espacios, tabulaciones
+ *             o saltos de línea como separadores.
+ * @Parametros: in: str = puntero a la cadena de caracteres
+ * @Retorno:    Cantidad de palabras encontradas en la cadena.
+ *             Devuelve 0 si la cadena está vacía o no contiene palabras.
+ *
+ **************************************************/
 int STRING_count_words(char *str) {
     int words = 0;
     int is_space = 0;
@@ -66,7 +83,15 @@ int STRING_count_words(char *str) {
     return words;
 }
 
-
+/**************************************************
+ *
+ * @Finalidad: Eliminar los espacios en blanco al inicio y al final de la cadena,
+ *             y compacta secuencias de espacios consecutivos en uno solo.
+ * @Parametros: in/out: str = puntero a la cadena que será modificada
+ *                        in situ para quitar el espacio innecesario.
+ * @Retorno:    ---
+ *
+ **************************************************/
 void STRING_strip_whitespace(char *str) {
     int read_index = 0, write_index = 0;
     int in_word = 0;  // Indica si estamos dentro de una palabra
@@ -94,7 +119,14 @@ void STRING_strip_whitespace(char *str) {
     str[write_index] = '\0';
 }
 
-
+/**************************************************
+ *
+ * @Finalidad: Convertir todos los caracteres alfabéticos de la cadena
+ *             a su versión en mayúsculas.
+ * @Parametros: in/out: str = puntero a la cadena que se va a convertir.
+ * @Retorno:    Devuelve el mismo puntero a la cadena modificada.
+ *
+ **************************************************/
 char *STRING_to_upper_case(char *str) {
     for (size_t i = 0; i < strlen(str); i++) {
         if (islower(str[i])) {
@@ -103,17 +135,23 @@ char *STRING_to_upper_case(char *str) {
     }
     return str;
 }
-
+/**************************************************
+ *
+ * @Finalidad: Reemplazar todas las apariciones del carácter 'old'
+ *             por el carácter 'new' en la cadena.
+ * @Parametros: in/out: old_str = puntero a la cadena  a modificar.
+ *              in: old     = carácter que se desea reemplazar.
+ *              in: new     = carácter con el que se reemplazará.
+ * @Retorno:    ---
+ *
+ **************************************************/
 void STRING_replace(char *old_str, char old, char new) {
     int old_str_len = (int)strlen(old_str);
-    // Allocate exactly old_str_len + 1 for the new string + null terminator
     char *new_str = (char *)malloc((old_str_len + 1) * sizeof(char));
     
     int j = 0;
-    // Iterate only through the characters (not including the terminating '\0')
     for (int i = 0; i < old_str_len; i++) {
         if (old_str[i] == old) {
-            // If we are "removing" the character by replacing it with '\0', skip adding it
             if (new != '\0') {
                 new_str[j] = new;
                 j++;
@@ -124,15 +162,25 @@ void STRING_replace(char *old_str, char old, char new) {
         }
     }
 
-    // Add the null terminator after processing all characters
     new_str[j] = '\0';
-
-    // Copy the modified string back to old_str
     strcpy(old_str, new_str);
     free(new_str);
 }
 
-
+/**************************************************
+ *
+ * @Finalidad: Leer del descriptor de archivo una línea de texto completa,
+ *             hasta encontrar el carácter '\n' o el fin de archivo (EOF).
+ * @Parametros: in:  fd         = descriptor de archivo desde el que se leerá.
+ *              out: read_bytes = puntero a entero donde se devolverá el número
+ *                                 de bytes leídos (incluyendo '\\n' si se leyó).
+ *              out: line       = puntero a puntero donde se asignará dinámicamente
+ *                                 la cadena resultante.
+ * @Retorno:    true si se leyó al menos un carácter antes de EOF (la línea puede
+ *             terminar en '\n'); false si se alcanzó EOF sin leer datos o en
+ *             caso de error.
+ *
+ **************************************************/
 bool STRING_read_line(int fd, int *read_bytes, char **line) {
     char ch;
     int read_value;
@@ -148,7 +196,7 @@ bool STRING_read_line(int fd, int *read_bytes, char **line) {
     do {
         read_value = read(fd, &ch, sizeof(char));
         switch (read_value) {
-            case -1:  // error
+            case -1:  
                 print_error("An error ocurred while reading the next byte.");
                 exit(-1);
                 break;
@@ -171,7 +219,17 @@ bool STRING_read_line(int fd, int *read_bytes, char **line) {
     (*line)[*read_bytes] = '\0';
     return is_eof;
 }
-
+/**************************************************
+ *
+ * @Finalidad: Obtener el enésimo campo de un mensaje donde los campos
+ *             están separados por un delimitador.
+ * @Parametros: in:  message = puntero a la cadena de entrada con campos separados.
+ *              in:  x       = índice  del campo a extraer.
+ * @Retorno:    Puntero a una cadena dinámica terminada en '\0' que contiene
+ *              el campo solicitado. Devuelve NULL si x está fuera de rango
+ *              o si ocurre un error de asignación de memoria.
+ *
+ **************************************************/
 char* STRING_getXFromMessage(const char* message, int x) {
     // Verificar si el mensaje es válido
     if (!message || x < 0) {
@@ -181,7 +239,7 @@ char* STRING_getXFromMessage(const char* message, int x) {
     // Crear una copia de la cadena para que strtok no altere el original
     char temp[247];
     strncpy(temp, message, 246); // Copia hasta 246 caracteres
-    temp[246] = '\0';            // Asegura terminación en nulo
+    temp[246] = '\0';
 
     // Inicializar el primer token
     char *token = strtok(temp, "&");
@@ -194,10 +252,20 @@ char* STRING_getXFromMessage(const char* message, int x) {
         }
     }
 
-    // Retornar una copia del `x`-ésimo token
     return token ? strdup(token) : NULL; // Duplicar el token antes de retornarlo
 }
-
+/**************************************************
+ *
+ * @Finalidad: Extraer la parte de la cadena tras el nombre del comando,
+ *             que corresponde a los argumentos completos.
+ * @Parametros: in:  global_cmd = puntero a la cadena que contiene el comando
+ *                               completo junto con sus argumentos
+ * @Retorno:    Puntero a una cadena dinámica (char*)
+ *             que contiene todo lo que hay después del primer espacio
+ *             en global_cmd (los argumentos). Devuelve NULL si no existen
+ *             argumentos o en caso de error de asignación.
+ *
+ **************************************************/
 char* STRING_extract_substring(char* global_cmd) {
     char* start = global_cmd + 8;
     char* end = strchr(start, ' ');
@@ -214,20 +282,37 @@ char* STRING_extract_substring(char* global_cmd) {
 
     return substring;
 }
-
+/**************************************************
+ *
+ * @Finalidad: Convertir todos los caracteres alfabéticos de la cadena
+ *             a su versión en minúsculas.
+ * @Parametros: in/out: str = puntero a la cadena que se va a convertir.
+ * @Retorno:    ---
+ *
+ **************************************************/
 void STRING_to_lowercase(char* str) {
     for (int i = 0; str[i]; i++) {
         str[i] = tolower(str[i]);
     }
 }
 
+/**************************************************
+ *
+ * @Finalidad: Extraer la tercera palabra de una cadena de texto.
+ * @Parametros: in: input = puntero a la cadena de caracteres de entrada.
+ * @Retorno:    Puntero a una nueva cadena dinámica (char*) que contiene
+ *             la tercera palabra encontrada.
+ *             Devuelve NULL si la cadena tiene menos de tres palabras
+ *             o si ocurre un error de asignación de memoria.
+ *
+ **************************************************/
 char* STRING_get_third_word(const char* input) {
     if (!input) {
-        return NULL; // Si la entrada es NULL, devuelve NULL.
+        return NULL;
     }
 
     const char* delimiter = " "; // Delimitador para dividir las palabras.
-    char* copy = strdup(input); // Crear una copia de la cadena para no modificar la original.
+    char* copy = strdup(input);
     if (!copy) {
         perror("Failed to allocate memory");
         return NULL;
@@ -247,10 +332,22 @@ char* STRING_get_third_word(const char* input) {
         token = strtok(NULL, delimiter);
     }
 
-    free(copy); // Liberar la memoria de la copia.
-    return third_word; // Devuelve la tercera palabra o NULL si no hay tres palabras.
+    free(copy);
+    return third_word;
 }
-
+/**************************************************
+ *
+ * @Finalidad: Extraer el código de canción embebido en un mensaje,
+ *             leyendo los primeros 'length' caracteres relevantes.
+ * @Parametros: in: message = puntero a la cadena de entrada que contiene
+ *                           información de la canción.
+ *              in: length  = número de caracteres del código a extraer.
+ * @Retorno:    Puntero a una cadena dinámica (char*) terminada en '\0'
+ *              que contiene el código de la canción extraído. Devuelve NULL
+ *              si 'message' es NULL, 'length' es <= 0, o en caso de error
+ *              de asignación de memoria.
+ *
+ **************************************************/
 char* STRING_getSongCode(const char* message, int length) {
     if (message == NULL || length <= 0) {
         write(STDOUT_FILENO, "Error: Invalid message\n", 24);
@@ -266,4 +363,25 @@ char* STRING_getSongCode(const char* message, int length) {
     memcpy(songCode, message, length);
     songCode[length] = '\0';
     return songCode;
+}
+/**************************************************
+ *
+ * @Finalidad: Eliminar todas las apariciones de un carácter
+ *             específico de una cadena de texto, compactando
+ *             la cadena in situ.
+ * @Parámetros: in/out: str = puntero a la cadena (terminada en '\\0')
+ *                        de la que se eliminará el carácter.
+ *              in:     ch  = carácter a buscar y eliminar.
+ * @Retorno:    --- 
+ *
+ **************************************************/
+void STRING_remove_char(char *str, char ch) {
+    char *src = str, *dst = str;
+    while (*src) {
+        if (*src != ch) {
+            *dst++ = *src;
+        }
+        src++;
+    }
+    *dst = '\0';
 }

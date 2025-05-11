@@ -1,3 +1,11 @@
+/***********************************************
+*
+* @Proposito: Declaracion de funciones para manipulación y procesamiento
+* @Autor/es: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
+* @Data creacion: 12/10/2024
+* @Data ultima modificacion: 18/05/2025
+*
+************************************************/
 #ifndef STRING_H
 #define STRING_H
 
@@ -31,6 +39,7 @@ char* STRING_extract_substring(char* global_cmd);
 void STRING_to_lowercase(char* str); 
 char* STRING_get_third_word(const char* input);
 char* STRING_getSongCode(const char* message, int length);
+void STRING_remove_char(char *str, char ch);
     
 #endif // STRING_H
 

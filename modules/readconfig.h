@@ -1,3 +1,12 @@
+/***********************************************
+*
+* @Proposito:  declara estructuras y funciones para leer y 
+*               gestionar fichero de configuración
+* @Autor/es: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
+* @Data creacion: 12/10/2024
+* @Data ultima modificacion: 18/05/2025
+*
+************************************************/
 #ifndef READCONFIG_H
 #define READCONFIG_H
 

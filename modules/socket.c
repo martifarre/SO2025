@@ -1,6 +1,24 @@
+/***********************************************
+*
+* @Proposito:  Implementa funciones para la creación, inicialización,
+*                conexión y verificación del estado de sockets
+* @Autor/es: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
+* @Data creacion: 12/10/2024
+* @Data ultima modificacion: 18/05/2025
+*
+************************************************/
 #define _GNU_SOURCE
 #include "string.h"
-
+/**************************************************
+ *
+ * @Finalidad: Inicializar un socket TCP en modo servidor y enlazarlo
+ *             a la dirección IP y puerto especificados para aceptar conexiones entrantes.
+ * @Parametros: in: incoming_Port = cadena con el número de puerto donde escuchar.
+ *              in: incoming_IP   = cadena con la dirección IP en la que bindear el socket.
+ * @Retorno:    Descriptor de archivo del socket en modo escucha (>=0) en caso de éxito;
+ *              -1 si ocurre un error al crear o enlazar el socket.
+ *
+ **************************************************/
 int SOCKET_initSocket(char* incoming_Port, char* incoming_IP) {
     uint16_t port;
     int aux = atoi (incoming_Port);
@@ -50,7 +68,19 @@ int SOCKET_initSocket(char* incoming_Port, char* incoming_IP) {
     return sockfd;
 
 }
-
+/**************************************************
+ *
+ * @Finalidad: Crear un socket TCP en modo cliente y conectarlo
+ *             al servidor especificado por dirección IP y puerto.
+ * @Parametros: in: incoming_Port = cadena con el número de puerto
+ *                                al que se desea conectar.
+ *              in: incoming_IP   = cadena con la dirección IP
+ *                                del servidor de destino.
+ * @Retorno:    Descriptor de archivo del socket conectado (>= 0)
+ *             en caso de éxito; -1 si ocurre un error al crear
+ *             o conectar el socket.
+ *
+ **************************************************/
 int SOCKET_createSocket(char *incoming_Port, char* incoming_IP) {
     uint16_t port;
     int aux = atoi(incoming_Port);
@@ -87,7 +117,16 @@ int SOCKET_createSocket(char *incoming_Port, char* incoming_IP) {
      
     return sockfd;
 }
-
+/**************************************************
+ *
+ * @Finalidad: Comprueba si el descriptor de socket dado sigue abierto
+ *             y es válido para operaciones de lectura/escritura.
+ * @Parametros: in: sockfd = descriptor de archivo del socket a verificar.
+ * @Retorno:    >0  si el socket está abierto y listo para usar.
+ *             ==0 si el socket está cerrado o la conexión se ha cerrado.
+ *             <0  en caso de error al comprobar el estado del socket.
+ *
+ **************************************************/
 int SOCKET_isSocketOpen(int sockfd) {
     char buffer[1];
     int flags = fcntl(sockfd, F_GETFL);
@@ -95,7 +134,7 @@ int SOCKET_isSocketOpen(int sockfd) {
         if (errno == EBADF) {
             return 0; // Descriptor no válido (cerrado)
         }
-        // Otro error raro, asumimos que está roto
+        // Otro error 
         return 0;
     }
 

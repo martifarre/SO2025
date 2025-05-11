@@ -3,3 +3,5 @@ bin/
 
 # Ignore all object files
 *.o
+.vscode/settings.json
+.gitignore

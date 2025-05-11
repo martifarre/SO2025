@@ -1,3 +1,12 @@
+/***********************************************
+*
+* @Proposito:  Declara funciones relacionadas con la distorsion de archivos
+*               y la compresion de texto
+* @Autor/es: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
+* @Data creacion: 12/10/2024
+* @Data ultima modificacion: 18/05/2025
+*
+************************************************/
 #ifndef DISTORSION_H
 #define DISTORSION_H
 
