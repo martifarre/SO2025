@@ -1,12 +1,9 @@
-//Ignacio Giral ignacio.giral
-//Marti Farre marti.farre
-
 /***********************************************
 *
-* @Proposito: Implementació del procés Fleck
-* @Autor/s: Ignacio Giral, Marti Farre (ignacio.giral, marti.farrea)
+* @Proposito: Implementación del proceso Fleck.
+* @Autor/es: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
 * @Data creacion: 12/10/2024
-* @Data ultima modificacion: 17/10/2024
+* @Data ultima modificacion: 18/05/2025
 *
 ************************************************/
 #define _GNU_SOURCE
@@ -50,6 +47,17 @@ void free_config() {
     free(config.server_port); // Liberar la memoria del puerto
 }
 
+/**************************************************
+ *
+ * @Finalidad: Leer una línea completa desde la entrada estándar,
+ *             dividirla en palabras separadas por espacios y contar cuántas hay.
+ * @Parametros: out: words = puntero a entero donde se almacenará el número
+ *                          de palabras encontradas en la línea.
+ * @Retorno:    Puntero a una cadena dinámica con el
+ *             comando completo (la línea leída). Devuelve NULL si ocurre
+ *             un error o si no se ingresó ningún dato.
+ *
+ **************************************************/
 char *read_command(int *words) {
     int read_bytes;
     print_text("\n");
@@ -60,7 +68,18 @@ char *read_command(int *words) {
     STRING_strip_whitespace(global_cmd);
     return global_cmd;
 }
-
+/**************************************************
+ *
+ * @Finalidad: Establecer la conexión inicial desde el cliente Fleck
+ *             al servidor Gotham, enviando el frame de registro
+ *             y esperando confirmación.
+ * @Parametros: ----.
+ * @Retorno:    Descriptor de socket conectado a Gotham (>= 0) si la
+ *             conexión y el handshake (TYPE=0x01) fueron exitosos;
+ *             -1 en caso de error de creación de socket, conexión o
+ *             respuesta negativa de Gotham (CON_KO).
+ *
+ **************************************************/
 int connectToGotham() {
     char *message = (char *)malloc(256 * sizeof(char));
     sprintf(message, "\nConnecting %s...\n", config.username);
@@ -89,6 +108,32 @@ int connectToGotham() {
     return 1;
 }
 
+/**************************************************
+ *
+ * @Finalidad: Gestionar de forma completa y síncrona la transferencia
+ *             de un fichero de distorsión con un worker (Harley o Enigma):
+ *               1. Enviar el frame de petición TYPE=0x03 con metadatos
+ *                  (nombre, tamaño, MD5 original, factor) al socket del worker.
+ *               2. Recibir el frame de respuesta TYPE=0x03 OK que autoriza
+ *                  el envío de datos.
+ *               3. Enviar el fichero en tramas TYPE=0x05 de tamaño fijo,
+ *                  comprobando el número de bytes enviados.
+ *               4. Tras completar la subida, recibir el frame TYPE=0x04
+ *                  con metadatos del fichero distorsionado (nuevo tamaño
+ *                  y MD5).
+ *               5. Descargar el fichero resultante en fragmentos TYPE=0x05,
+ *                  y reconstruirlo localmente, comprobando integridad.
+ *               6. Finalizar con TYPE=0x06 CHECK_OK o gestionar error
+ *                  en caso de CHECK_KO.
+ * @Parametros: in: sockfd     = descriptor de socket conectado al worker.
+ *              in: fileName   = nombre del fichero a distorsionar.
+ *              in: fileSize   = cadena con el tamaño original en bytes.
+ *              in/out: element = puntero a la estructura de estado que
+ *                               almacena desplazamientos, MD5 y progreso.
+ * @Retorno:    0 si todo el proceso de subida, procesamiento y descarga
+ *             se completó correctamente; < 0 si ocurre cualquier error.
+ *
+ **************************************************/
 int realFileDistorsion(int sockfd, char* fileName, char* fileSize, listElement2* element) {
     // Crear path del archivo
     char* path = NULL;
@@ -129,11 +174,12 @@ int realFileDistorsion(int sockfd, char* fileName, char* fileSize, listElement2*
 
             pthread_mutex_lock(&myMutex);
 
-            // 🔹 Verificar si el socket sigue abierto antes de enviar datos
+            //Verificar si el socket sigue abierto antes de enviar datos
             char test;
             int check = recv(sockfd, &test, 1, MSG_PEEK | MSG_DONTWAIT);
 
-            if (check == 0) {  // 🔹 El worker ha cerrado la conexión
+            //El worker ha cerrado la conexión
+            if (check == 0) { 
                 write(STDOUT_FILENO, "Worker connection closed.\n", 26);
                 pthread_mutex_unlock(&myMutex);
                 return 0;
@@ -143,7 +189,7 @@ int realFileDistorsion(int sockfd, char* fileName, char* fileSize, listElement2*
                 return 0;
             }
 
-            // 🔹 Enviar datos al worker (sin modificar TRAMA_sendMessageToSocket())
+            //Enviar datos al worker (sin modificar TRAMA_sendMessageToSocket())
             TRAMA_sendMessageToSocket(sockfd, 0x03, sizeOfBuf, message);
 
             pthread_mutex_unlock(&myMutex);
@@ -267,6 +313,19 @@ int realFileDistorsion(int sockfd, char* fileName, char* fileSize, listElement2*
     return 1;
 }
 
+/**************************************************
+ *
+ * @Finalidad: Enviar la trama de metadatos del fichero
+ *             al socket del worker, incluyendo el MD5
+ *             original y el factor de distorsión.
+ * @Parametros: in: sockfd    = descriptor de socket conectado al worker.
+ *              in: filename  = nombre del fichero a distorsionar.
+ *              in: factor    = factor de distorsión.
+ *              in: fileSize  = tamaño del fichero en bytes.
+ *              in: path      = ruta completa del fichero a distorsionar.
+ * @Retorno:    Ninguno.
+ *
+ **************************************************/
 void sendSongInfo(int sockfd, char* filename, char* factor, char* fileSize, char* path) {
     int fds[2];
     pipe(fds);
@@ -297,7 +356,23 @@ void sendSongInfo(int sockfd, char* filename, char* factor, char* fileSize, char
         free(data);
     }
 }
-
+/**************************************************
+ *
+ * @Finalidad: Proceso de distorsión de un fichero
+ *             desde el cliente Fleck: conecta al worker adecuado
+ *             según el tipo, envía los metadatos (nombre, factor),
+ *             delega la transferencia de datos y actualiza el estado
+ *             de la tarea en ‘element’.
+ * @Parametros: in: type     = cadena que indica el tipo de distorsión
+ *                             (Media o Text).
+ *              in: filename = nombre del fichero a distorsionar.
+ *              in: factor   = cadena con el factor de distorsión
+ *              in/out: element = puntero a la estructura listElement2
+ *                               donde se almacenan el progreso,
+ *                               los offsets y el resultado final.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void distortFile (char* type, char* filename, char* factor, listElement2* element) {
     if (strcmp(type, "Media") == 0) {
         if (ongoing_media_distortion) {
@@ -402,6 +477,19 @@ void distortFile (char* type, char* filename, char* factor, listElement2* elemen
 
 }
 
+/**************************************************
+ *
+ * @Finalidad: Desconectar al cliente Fleck del sistema.
+ *             Realiza los siguientes pasos:
+ *               1. Envía el frame de logout (TYPE=0x07) a Gotham
+ *                  con el nombre de usuario.
+ *               2. Cierra el socket de comunicación con Gotham.
+ *               3. Libera los recursos asociados (memoria, listas de tareas).
+ *               4. Vuelve al prompt del shell o finaliza el proceso.
+ * @Parametros: ----.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void doLogout () {
     write(STDOUT_FILENO, "Logging out...\n", 15);
     if (SOCKET_isSocketOpen(sockfd_G)) {
@@ -422,7 +510,18 @@ void doLogout () {
         sockfd_E = -1;
     }
 }
-
+/**************************************************
+ *
+ * @Finalidad: Manejador de la señal SIGINT (CTRL+C) para el cliente Fleck.
+ *             Se invoca al presionar CTRL+C y debe:
+ *               1. Si hay conexión activa con Gotham, enviar el frame de logout.
+ *               2. Cerrar el socket de comunicación con Gotham.
+ *               3. Liberar los recursos asignados (configuración, listas de tareas, etc.).
+ *               4. Terminar la ejecución del proceso.
+ * @Parametros: in: signum = número de la señal recibida (debe ser SIGINT).
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void CTRLC(int signum) {
     print_text("\nInterrupt signal CTRL+C received\n");
     doLogout();
@@ -438,8 +537,16 @@ void CTRLC(int signum) {
     raise(SIGINT);
 }
 
+/**************************************************
+ *
+ * @Finalidad: Hilo que vigila la conexión del cliente Fleck
+ *             con el worker asignado.
+ * @Parametros: ----.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void *connection_watcher() {
-    while (connected) { // Solo verifica mientras esté conectado
+    while (connected) {                                 // Solo verifica mientras esté conectado
         if (!SOCKET_isSocketOpen(sockfd_G)) {
             write(STDOUT_FILENO, "Connection to Gotham server lost.\n", 34);
             connected = 0;
@@ -450,12 +557,12 @@ void *connection_watcher() {
             while (distortions_in_progress) {
                 distortions_in_progress = 0;
 
-                pthread_mutex_lock(&myMutex); // Proteger el acceso a la lista
+                pthread_mutex_lock(&myMutex);           // Proteger el acceso a la lista
                 if (!LINKEDLIST2_isEmpty(distortionsList)) {
                     LINKEDLIST2_goToHead(distortionsList);
                     while (!LINKEDLIST2_isAtEnd(distortionsList)) {
                         listElement2* element = LINKEDLIST2_get(distortionsList);
-                        if (element->status != 4) { // Si no está completada
+                        if (element->status != 4) {     // Si no está completada
                             distortions_in_progress = 1;
                             break;
                         }
@@ -466,7 +573,7 @@ void *connection_watcher() {
 
                 if (distortions_in_progress) {
                     write(STDOUT_FILENO, "Waiting for distortions to finish...\n", 37);
-                    sleep(1); // Esperar un segundo antes de volver a verificar
+                    sleep(1);                           // Esperar un segundo antes de volver a verificar
                 }
             }
 
@@ -489,12 +596,22 @@ void *connection_watcher() {
             break;
         } 
 
-        sleep(5); // Esperar antes de volver a verificar
+        sleep(5);                                   // Esperar antes de volver a verificar
     }
 
     return NULL;
 }
 
+/**************************************************
+ *
+ * @Finalidad: Mostrar al usuario el estado de todas las operaciones de distorsión
+ *             que existen en la lista de tareas de Fleck, incluyendo tanto las
+ *             que están en curso como las ya finalizadas. Para cada tarea imprime
+ *             el porcentaje de avance y una barra gráfica.
+ * @Parametros: ----.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void CHECK_STATUS() {
     if (LINKEDLIST2_isEmpty(distortionsList)) {
         write(STDOUT_FILENO, "No distortions in progress.\n", 28);
@@ -514,7 +631,7 @@ void CHECK_STATUS() {
 
         float progress = 0.0;
 
-        if (element->status == 0) {  // Inicialización
+        if (element->status == 0) {         // Inicialización
             write(STDOUT_FILENO, "Status: Initialization\n", strlen("Status: Initialization\n"));
         } else if (element->status == 1) {  // Fase de envío (0 - 50%)
             progress = ((float)element->bytes_writtenF1 / element->bytes_to_writeF1) * 50;
@@ -537,7 +654,15 @@ void CHECK_STATUS() {
     }
 }
 
-
+/**************************************************
+ *
+ * @Finalidad: Eliminar de la lista interna de tareas de distorsión
+ *             aquellas que ya han finalizado, liberando los recursos
+ *             asociados y dejando únicamente las operaciones en curso.
+ * @Parametros: ----.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void CLEAR_ALL() {
     if (LINKEDLIST2_isEmpty(distortionsList)) {
         write(STDOUT_FILENO, "No distortions in the list.\n", 28);
@@ -566,6 +691,15 @@ void CLEAR_ALL() {
     }
 }
 
+/**************************************************
+ *
+ * @Finalidad: Hilo destinado a gestionar la distorsión
+ *               completa de un fichero solicitado por Fleck.
+ * @Parametros: in: arg = puntero a la estructura `listElement2` que contiene
+ *                     toda la información de la tarea a procesar.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void* distortFileThread(void* arg) {
     DistortionThreadParams* params = (DistortionThreadParams*)arg;
     distortFile(params->type, params->filename, params->factor, params->element);
@@ -574,6 +708,17 @@ void* distortFileThread(void* arg) {
     return NULL;
 }
 
+/**************************************************
+ *
+ * @Finalidad: Ejecutar el bucle principal del intérprete de comandos de Fleck,
+ *             mostrando el prompt, leyendo entradas del usuario, parseando la
+ *             orden y delegando en la función correspondiente (CONNECT, LIST,
+ *             DISTORT, CHECK STATUS, CLEAR ALL, LOGOUT, etc.).
+ *             Permite iterar hasta que el usuario finalice la sesión o pulse CTRL+C.
+ * @Parametros: ----.
+ * @Retorno:    ----
+ *
+ **************************************************/
 void terminal() {
     char* type_copy;
     char* factor_copy;
@@ -687,6 +832,27 @@ void terminal() {
     }
 }
 
+/**************************************************
+ *
+ * @Finalidad: Punto de entrada del cliente Fleck. Se encarga de:
+ *             - Validar la recepción de la ruta del fichero de configuración
+ *               como argumento de línea de comandos.
+ *             - Leer y parsear la configuración (usuario, carpeta,
+ *               IP y puerto de Gotham).
+ *             - Registrar el manejador de SIGINT (CTRL+C) para desconexión limpia.
+ *             - Iniciar el bucle del terminal (terminal()) para procesar
+ *               comandos del usuario (CONNECT, LIST, DISTORT, etc.).
+ *             - Al finalizar la sesión, realizar logout ordenado y
+ *               liberar recursos antes de salir.
+ * @Parametros: in: argc = número de argumentos (debe ser 2).
+ *              in: argv = vector de cadenas:
+ *                     argv[0] = nombre del ejecutable,
+ *                     argv[1] = ruta al fichero de configuración de Fleck.
+ * @Retorno:    0 si finaliza correctamente tras cerrar conexión y liberar recursos;
+ *             distinto de 0 si ocurre un error en argumentos, lectura de
+ *             configuración o conexión inicial.
+ *
+ **************************************************/
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         write(STDOUT_FILENO, "Usage: Fleck <config_file>\n", 27);
