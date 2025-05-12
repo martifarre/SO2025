@@ -1,12 +1,9 @@
-//Ignacio Giral ignacio.giral
-//Marti Farre marti.farre
-
 /***********************************************
 *
-* @Proposito: Implementació del procés Worker
-* @Autor/s: Ignacio Giral, Marti Farre (ignacio.giral, marti.farrea)
+* @Proposito: Implementación del proceso Worker.
+* @Autor/es: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
 * @Data creacion: 12/10/2024
-* @Data ultima modificacion: 17/10/2024
+* @Data ultima modificacion: 18/05/2025
 *
 ************************************************/
 #define _GNU_SOURCE
@@ -60,6 +57,19 @@ void free_config() {
     free(config.worker_type);
 }
 
+/**************************************************
+ *
+ * @Finalidad: Leer mensajes de la cola de comunicación (message queue)
+ *             e insertar cada nueva tarea en la lista linkedlist.
+ *             Se utiliza para procesar eventos entrantes de distintos tipos
+ *             (por ejemplo, notificaciones de crash o reasignaciones).
+ * @Parametros: in/out: listW = instancia de LinkedList2 donde agregar los elementos
+ *                             recibidos de la cola.
+ *              in:     type  = entero que indica la categoría de mensaje a leer
+ *                             (p. ej. 0 para eventos de medios, 1 para texto).
+ * @Retorno:    ---.
+ *
+ **************************************************/
 void read_from_msq(LinkedList2 listW, int type) {
     write(STDOUT_FILENO, "[DEBUG] Iniciando `read_from_msq`...\n", 37);
 
@@ -131,6 +141,19 @@ void read_from_msq(LinkedList2 listW, int type) {
     write(STDOUT_FILENO, "[DEBUG] `read_from_msq` finalizado.\n", 36);
 }
 
+/**************************************************
+ *
+ * @Finalidad: Encolar una tarea representada por ‘element’ 
+ *             en la cola de mensajes correspondiente al tipo de trabajador,
+ *             para que Gotham o un worker lo procese posteriormente.
+ * @Parametros: in: element    = puntero a la estructura listElement2 que contiene
+ *                              los datos de la tarea 
+ *              in: workerType = indica el tipo de worker
+ 
+ * @Retorno:    --- (void). Cualquier fallo en la operación se registra
+ *             internamente en la estructura de error de la cola o lista.
+ *
+ **************************************************/
 void send_to_msq(listElement2* element, int workerType) {
     if (element == NULL) {
         write(STDOUT_FILENO, "[ERROR] NULL element in send_to_message_queue.\n", 47);
@@ -187,7 +210,13 @@ void send_to_msq(listElement2* element, int workerType) {
     }
 }
 
-// Crear o asegurar el archivo necesario para ftok
+/**************************************************
+ *
+ * @Finalidad: Comprobar que el fichero  de trabajo
+ *             asignado al worker existe; en caso contrario, crearlo.
+ * @Parametros: ----.
+ * @Retorno:    ----.
+ **************************************************/
 void ensure_worker_file_exists() {
     if (access(WORKER_FILE, F_OK) == -1) {
         // El archivo no existe, lo creamos
@@ -200,7 +229,17 @@ void ensure_worker_file_exists() {
     }
 }
 
-// Crear o obtener la MSQ
+/**************************************************
+ *
+ * @Finalidad: Obtener el número de trabajadores (workers)
+ *             actualmente registrados en la cola de mensajes (MSQ),
+ *             diferenciando por tipo si fuera necesario.
+ * @Parametros: ----.
+ * @Retorno:    Entero que indica la cantidad de workers disponibles en la MSQ:
+ *              >= 0 si la consulta fue exitosa;
+ *              -1 si ocurrió un error al acceder o consultar la cola.
+ *
+ **************************************************/
 int get_worker_count_msq() {
     ensure_worker_file_exists(); // Asegurar que el archivo existe
 
@@ -217,7 +256,16 @@ int get_worker_count_msq() {
     }
     return msqid;
 }
-
+/**************************************************
+ *
+ * @Finalidad: Incrementar en uno el contador interno
+ *             que lleva la cuenta de trabajadores activos,
+ *             utilizado para gestionar la disponibilidad
+ *             de workers en el sistema.
+ * @Parametros: ----.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void increment_worker_count() {
     int msqid = get_worker_count_msq();
     struct {
@@ -228,7 +276,16 @@ void increment_worker_count() {
         perror("[ERROR] increment_worker_count: msgsnd failed");
     } 
 }
-
+/**************************************************
+ *
+ * @Finalidad: Reducir en uno el contador interno
+ *             que lleva la cuenta de trabajadores activos,
+ *             utilizado para gestionar la disponibilidad
+ *             de workers en el sistema.
+ * @Parametros: ----.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void decrement_worker_count() {
     int msqid = get_worker_count_msq();
     struct {
@@ -239,7 +296,15 @@ void decrement_worker_count() {
         perror("[ERROR] decrement_worker_count: msgrcv failed");
     } 
 }
-
+/**************************************************
+ *
+ * @Finalidad: Recuperar el número actual de trabajadores activos
+ *             registrados en el sistema.
+ * @Parametros: --- (no recibe argumentos)
+ * @Retorno:    Entero ≥ 0 con la cantidad de workers disponibles.
+ *             Devuelve 0 si no hay ninguno.
+ *
+ **************************************************/
 int get_worker_count() {
     int msqid = get_worker_count_msq();
     struct msqid_ds buf;
@@ -249,14 +314,33 @@ int get_worker_count() {
     }
     return buf.msg_qnum; // Número de mensajes en la cola
 }
-
+/**************************************************
+ *
+ * @Finalidad: Eliminar la cola de mensajes.
+ * @Parametros: ----.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void delete_worker_count_msq() {
     int msqid = get_worker_count_msq();
     if (msgctl(msqid, IPC_RMID, NULL) == -1) {
         perror("[ERROR] delete_worker_count_msq: msgctl failed");
     } 
 }
-
+/**************************************************
+ *
+ * @Finalidad: Función diseñada para ejecutarse como hilo (pthread) 
+ *             y encargarse de gestionar de forma asíncrona la distorsión 
+ *             completa de un fichero. Toma los parámetros de la tarea, 
+ *             invoca la lógica de transferencia de tramas y de compresión, 
+ *             actualiza el estado en la lista de tareas y notifica al cliente.
+ * @Parametros: in: arg = puntero a una estructura (p. ej. listElement2*) 
+ *                     que contiene todos los metadatos de la tarea:
+ *                     nombre de fichero, factor de distorsión, socket,
+ *                     desplazamientos ya transferidos, MD5 original, etc.
+ * @Retorno:    Devuelve NULL al finalizar.
+ *
+ **************************************************/
 void* distortFileThread(void* arg) {
     listElement2* element = (listElement2*)arg;
     if (element == NULL) {
@@ -305,7 +389,17 @@ void* distortFileThread(void* arg) {
     return NULL;
 }
 
-
+/**************************************************
+ *
+ * @Finalidad: Inicializar el socket de servidor del worker,
+ *             creando y configurando el socket TCP para escuchar
+ *             en la IP y el puerto definidos en su configuración.
+ *             Prepara la cola de conexiones entrantes para
+ *             que el worker pueda aceptar peticiones de Fleck.
+ * @Parametros: ----.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void initServer() {
     struct trama wtrama;
 
@@ -418,7 +512,16 @@ void initServer() {
 }
 
     
-
+/**************************************************
+ *
+ * @Finalidad: Gestionar la desconexión ordenada del worker respecto al servidor Gotham.
+ *             Envía el frame de logout (TYPE=0x07), cierra el socket de comunicación,
+ *             libera los recursos asociados y finaliza el proceso
+ *             o retorna al estado previo según la lógica de reconexión.
+ * @Parametros: ----.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void doLogout() {
     if (SOCKET_isSocketOpen(sockfd)) {
         write(STDOUT_FILENO, "Sending logout message to Gotham server...\n", 43);
@@ -489,7 +592,18 @@ void doLogout() {
 
     write(STDOUT_FILENO, "All connections closed.\n", 25);
 }
-
+/**************************************************
+ *
+ * @Finalidad: Manejador de la señal SIGINT (CTRL+C) para el worker.
+ *             Se invoca cuando el usuario presiona CTRL+C y debe:
+ *             - Notificar a Gotham la desconexión si está conectado.
+ *             - Cerrar el socket de escucha y cualquier otro descriptor abierto.
+ *             - Liberar recursos y memoria.
+ *             - Terminar el proceso de forma ordenada.
+ * @Parametros: in: signum = número de señal recibida (debe ser SIGINT).
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void CTRLC(int signum) {
     write(STDOUT_FILENO, "\nInterrupt signal CTRL+C received. Stopping worker...\n", 54);
     *stop_signal = 1; 
@@ -504,6 +618,15 @@ void CTRLC(int signum) {
     raise(SIGINT);
 }
 
+/**************************************************
+ *
+ * @Finalidad: Hilo encargado de supervisar la conexión del worker
+ *             con el servidor Gotham de forma continua. Detecta
+ *             caídas en la comunicación.
+ * @Parametros: ----.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void *connection_watcher() {
     write(STDOUT_FILENO, "[DEBUG] connection_watcher: Started watching connection...\n", 59);
 
@@ -528,7 +651,28 @@ void *connection_watcher() {
     return NULL;
 }
 
-
+/**************************************************
+ *
+ * @Finalidad: Punto de entrada del proceso Worker. Se encarga de:
+ *             - Validar que se reciba la ruta del fichero de configuración
+ *               como argumento.
+ *             - Leer y parsear ese fichero para inicializar los parámetros
+ *               de conexión a Gotham, el socket de escucha, el directorio
+ *               de trabajo y el tipo de worker.
+ *             - Conectar al servidor Gotham y registrarse como worker activo.
+ *             - Crear y gestionar la lista de tareas pendientes.
+ *             - Lanzar un hilo de vigilancia de conexión (connection_watcher).
+ *             - Iniciar el servidor para recivir peticiones de Fleck mediante initServer().
+ *             - Al terminar, enviar logout ordenado, limpiar recursos y salir.
+ * @Parametros: in: argc = número de argumentos de línea de comandos (debe ser 2).
+ *              in: argv = vector de cadenas:
+ *                     argv[0] = nombre del ejecutable,
+ *                     argv[1] = ruta al fichero de configuración del worker.
+ * @Retorno:    0 si finaliza correctamente tras cerrar conexiones y liberar recursos;
+ *             sale con código distinto de 0 si ocurre un error de argumentos,
+ *             lectura de configuración, conexión o registro inicial.
+ *
+ **************************************************/
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         write(STDOUT_FILENO, "Usage: Worker <config_file>\n", 28);
