@@ -1,12 +1,9 @@
-//Ignacio Giral ignacio.giral
-//Marti Farre marti.farre
-
 /***********************************************
 *
-* @Proposito: Implementació del procés Gotham
-* @Autor/s: Ignacio Giral, Marti Farre (ignacio.giral, marti.farrea)
+* @Proposito: Implementación del proceso Gotham.
+* @Autor/es: Ignacio Giral, Marti Farre (ignacio.giral, marti.farre)
 * @Data creacion: 12/10/2024
-* @Data ultima modificacion: 17/10/2024
+* @Data ultima modificacion: 18/05/2025
 *
 ************************************************/
 #define _GNU_SOURCE
@@ -20,7 +17,7 @@ LinkedList listF;
 
 int gotham_flag = 0;
 
-//arkham pipe and mutex
+//Arkham pipe and mutex
 int pipe_fds[2];
 pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -28,7 +25,15 @@ int fleck_connecter_fd = -1, worker_connecter_fd = -1;
 
 int pipefd[2];
 
-
+/**************************************************
+ *
+ * @Finalidad: Liberar todos los recursos dinámicos asignados
+ *             para la configuración de Gotham, incluyendo
+ *             cadenas de IP y puerto y estructuras internas.
+ * @Parametros: ----.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void free_config() {
     free(config.fleck_server_ip);
     free(config.fleck_server_port); // Liberar la memoria del puerto
@@ -38,7 +43,16 @@ void free_config() {
 
 int i = 0;
 
-// Function to log an event (used by Gotham process)
+/**************************************************
+ *
+ * @Finalidad: Enviar un mensaje de evento al proceso logger (Arkham),
+ *             formateando la entrada con timestamp y escribiéndola
+ *             en el pipe de comunicación para su registro posterior.
+ * @Parametros: in: event = cadena de texto que describe el evento ocurrido
+ *                         
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void log_event(const char *event) {
     write(STDOUT_FILENO, event, strlen(event));
     char timestamped_event[256];
@@ -55,6 +69,22 @@ void log_event(const char *event) {
     pthread_mutex_unlock(&log_mutex);
 }
 
+/**************************************************
+ *
+ * @Finalidad: Atender en Gotham la solicitud de distorsión de un cliente Fleck.
+ *             Busca un worker del tipo indicado (Media o Texto) entre los
+ *             trabajadores activos y envía al cliente la dirección (IP y puerto)
+ *             del worker principal en una trama de respuesta. Si no hay ningún
+ *             worker disponible, envía un mensaje de error (DISTORT_KO).
+ * @Parametros: in: fleckSock = descriptor del socket conectado con el cliente Fleck.
+ *              in: type      = cadena que indica el tipo de worker solicitado.
+ *                              (Media o Texto).
+ *              in: longitud = longitud en bytes del campo de datos de la trama
+ *                            recibida originalmente (se usa para preparar la
+ *                            respuesta correctamente).
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void searchWorkerAndSendInfo(int fleckSock, char* type, uint16_t longitud) {
     listElement* element = NULL;
     char* message = (char*)malloc(sizeof(char) * 256);
@@ -88,7 +118,17 @@ void searchWorkerAndSendInfo(int fleckSock, char* type, uint16_t longitud) {
     }
     free(message);
 }
-
+/**************************************************
+ *
+ * @Finalidad: Función que se ejecuta en un hilo para gestionar de forma concurrente
+ *             la sesión de un cliente Fleck conectado a Gotham. Atiende todas las
+ *             solicitudes de ese cliente, incluyendo comandos de LIST, DISTORT y LOGOUT,
+ *             redirigiendo las peticiones al worker correspondiente y enviando las respuestas.
+ * @Parametros: in: arg = puntero a un entero (o estructura) que contiene el descriptor
+ *                     de socket del cliente Fleck aceptado por Gotham.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void* threadFleck(void* arg) {
     int fleckSock = *(int*)arg;
     struct trama gtrama;
@@ -103,7 +143,6 @@ void* threadFleck(void* arg) {
     if (gtrama.tipo == 0x01) {
         char* username = STRING_getXFromMessage((const char *)gtrama.data, 0);
         
-        // We no longer need gtrama.data after extracting username
         free(gtrama.data); 
         gtrama.data = NULL;
 
@@ -122,7 +161,7 @@ void* threadFleck(void* arg) {
         TRAMA_sendMessageToSocket(fleckSock, 0x01, 0, "");
         free(data);
 
-        // Now enter the loop to read subsequent messages
+        //Ahora entra al bucle para leer los mensajes siguientes
         while (1) {
             int result = TRAMA_readMessageFromSocket(fleckSock, &gtrama);
             if(result == -2) {
@@ -135,7 +174,7 @@ void* threadFleck(void* arg) {
                 break;  // Salir del bucle
             }
             
-            // Process subsequent messages
+            // Procesar mensajes
             if (gtrama.tipo == 0x10 || gtrama.tipo == 0x11) {
                 if (strcmp((const char *)gtrama.data, "CON_KO") == 0) {
                     write(STDOUT_FILENO, "Error: Distortion of this type already in progress.\n", 53);
@@ -166,7 +205,6 @@ void* threadFleck(void* arg) {
                 while(!LINKEDLIST_isAtEnd(listF)) {
                     listElement* currentElement = LINKEDLIST_get(listF);
                     if(strcmp(currentElement->fleck_username, (const char *)gtrama.data) == 0 && currentElement->sockfd == fleckSock) {
-                        // Finish using gtrama.data after comparison
                         free(gtrama.data); 
                         gtrama.data = NULL;
                         char* data = (char*)malloc(sizeof(char) * 256);
@@ -183,13 +221,12 @@ void* threadFleck(void* arg) {
                 write(STDOUT_FILENO, "Fleck was disconnected.\n\n", 26);
                 break;
             } else {
-                // If other message types appear, ensure to free gtrama.data after using it:
                 free(gtrama.data);
                 gtrama.data = NULL;
             }
         }
     } else {
-        // If the first message isn't 0x01, we've read it but not used gtrama.data:
+        // Si el primer mensaje no es 0x01, lo hemos leído pero no hemos utilizado gtrama.data:
         free(gtrama.data);
         gtrama.data = NULL;
     }
@@ -198,6 +235,16 @@ void* threadFleck(void* arg) {
     return NULL;
 }
 
+/**************************************************
+ *
+ * @Finalidad: Hilo encargado de escuchar continuamente en el socket
+ *             de Gotham para nuevas conexiones de clientes Fleck.
+ *             Por cada conexión entrante, acepta el socket y lanza
+ *             un nuevo hilo (threadFleck) para atender la sesión del cliente.
+ * @Parametros: ----.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void* funcThreadFleckConnecter() {
     fleck_connecter_fd = SOCKET_initSocket(config.fleck_server_port, config.fleck_server_ip);
     
@@ -205,11 +252,11 @@ void* funcThreadFleckConnecter() {
     struct sockaddr_in c_addr;
     socklen_t c_len = sizeof(c_addr);
 
-    // 🔹 Poner el socket en modo NO BLOQUEANTE
+    // Poner el socket en modo NO BLOQUEANTE
     fcntl(fleck_connecter_fd, F_SETFL, O_NONBLOCK);
 
     while (1) {
-        usleep(10000);  // 🔹 Pequeña pausa para evitar alto consumo de CPU
+        usleep(10000);  //Pequeña pausa para evitar alto consumo de CPU
 
         newsock = accept(fleck_connecter_fd, (struct sockaddr*)&c_addr, &c_len);
         if (newsock < 0) {
@@ -220,7 +267,6 @@ void* funcThreadFleckConnecter() {
                 }
                 continue;
             } else {
-                // 🔹 Error grave en `accept()`
                 perror("Error: Cannot accept connection");
                 exit(EXIT_FAILURE);
             }
@@ -231,6 +277,25 @@ void* funcThreadFleckConnecter() {
     }
 }
 
+/**************************************************
+ *
+ * @Finalidad: Función que se ejecuta en un hilo para gestionar la sesión
+ *             de un worker (Enigma o Harley) conectado a Gotham. Entre sus
+ *             responsabilidades están:
+ *             - Leer el frame de registro inicial (TYPE=0x02) y añadir
+ *               el worker a la lista de activos.
+ *             - Mantener el estado del worker, atendiendo
+ *               o detectando desconexiones inesperadas.
+ *             - Al recibir una desconexión
+ *               remueve el worker de la lista.
+ * @Parametros: in: arg = puntero a entero que contiene el descriptor
+ *                     de socket del worker aceptado por el socket
+ *                     de escucha de Gotham.
+ * @Retorno:    Devuelve NULL cuando el worker se desconecta o se produce
+ *             un error de comunicación, indicando el fin de la ejecución
+ *             del hilo.
+ *
+ **************************************************/
 void* threadWorker(void* arg) {
     write(STDOUT_FILENO, "Worker connected\n\n", 19);
     int principal = 0;
@@ -246,7 +311,7 @@ void* threadWorker(void* arg) {
     // Leer el primer mensaje
     if (TRAMA_readMessageFromSocket(newsock, &gtrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated...\n", 34);
-        free(aux);  // Liberar aux antes de salir
+        free(aux);                          // Liberar aux antes de salir
         return NULL;
     }
 
@@ -256,7 +321,7 @@ void* threadWorker(void* arg) {
         char* ip          = STRING_getXFromMessage((const char *)gtrama.data, 1);
         char* port        = STRING_getXFromMessage((const char *)gtrama.data, 2);
 
-        free(gtrama.data);  // Liberar gtrama.data después de usarlo
+        free(gtrama.data);                  // Liberar gtrama.data después de usarlo
         gtrama.data = NULL;
 
         if (!worker_type || !ip || !port) {  // Validar asignación de campos
@@ -377,17 +442,28 @@ void* threadWorker(void* arg) {
             }
             free(gtrama.data);  // Liberar gtrama.data tras procesar
             gtrama.data = NULL;
-            break;  // Salir del bucle
+            break;              // Salir del bucle
         }
 
-        free(gtrama.data);  // Liberar gtrama.data tras procesar
+        free(gtrama.data);      // Liberar gtrama.data tras procesar
         gtrama.data = NULL;
     }
 
-    close(newsock);  // Cerrar el socket al final
+    close(newsock);             // Cerrar el socket al final
     return NULL;
 }
-
+/**************************************************
+ *
+ * @Finalidad: Hilo encargado de escuchar de forma continua
+ *             en el socket de Gotham para nuevas conexiones
+ *             de workers (Enigma o Harley). Por cada conexión entrante:
+ *               - Acepta el socket.
+ *               - Lanza un hilo (threadWorker) para gestionar la sesión
+ *                 de ese worker.
+ * @Parametros: ----.
+ * @Retorno:    Devuelve NULL al finalizar.
+ *
+ **************************************************/
 void* funcThreadWorkerConnecter() {
     worker_connecter_fd = SOCKET_initSocket(config.external_server_port, config.external_server_ip);
     
@@ -395,7 +471,7 @@ void* funcThreadWorkerConnecter() {
     struct sockaddr_in c_addr;
     socklen_t c_len = sizeof(c_addr);
 
-    // 🔹 Establecer el socket en modo NO BLOQUEANTE
+    //Establecer el socket en modo NO BLOQUEANTE
     fcntl(worker_connecter_fd, F_SETFL, O_NONBLOCK);
 
     while (1) {
@@ -410,7 +486,6 @@ void* funcThreadWorkerConnecter() {
                 }
                 continue;
             } else {
-                // 🔹 Error real
                 perror("Error: Cannot accept connection");
                 exit(EXIT_FAILURE);
             }
@@ -421,6 +496,19 @@ void* funcThreadWorkerConnecter() {
     }
 }
 
+/**************************************************
+ *
+ * @Finalidad: Detiene el servidor Gotham y desconectar
+ *             todas las sesiones activas de Fleck y de workers.
+ *             Para cada conexión:
+ *               1. Envía la cadena "OUT" directamente por el socket.
+ *               2. Realiza shutdown(SHUT_WR) y close() del descriptor.
+ *               3. Espera a la terminación del hilo asociado (pthread_join).
+ *               4. Libera los recursos de memoria y elimina el nodo de la lista.
+ * @Parametros: ----
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void doLogout() {
     gotham_flag = 1; // Indicar que Gotham está cerrando
 
@@ -472,7 +560,14 @@ void doLogout() {
 
     write(STDOUT_FILENO, "All connections closed.\n", 24);
 }
-
+/**************************************************
+ *
+ * @Finalidad: Manejador de la señal SIGINT (CTRL+C) para el servidor Gotham.
+ *             Se invoca al recibir la señal.
+ * @Parametros: in: signum = número de la señal capturada (debe ser SIGINT).
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void CTRLC(int signum) {
     print_text("\nInterrupt signal CTRL+C received\n");
     close(pipe_fds[1]); // Close the write end of the pipe
@@ -489,14 +584,29 @@ void CTRLC(int signum) {
     raise(SIGINT);
 }
 
-// Signal handler for child process (Arkham)
+/**************************************************
+ *
+ * @Finalidad: Manejador de la señal SIGINT (CTRL+C) para el proceso Arkham.
+ *             Se invoca al recibir la señal.
+ * @Parametros: in: signum = número de la señal capturada (debe ser SIGINT).
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void signalHandlerArkham(int signum) {
-    close(pipe_fds[0]); // Close the read end of the pipe
+    close(pipe_fds[0]); 
 
     exit(EXIT_SUCCESS);
 }
 
-// Function to write to the log file (used by Arkham process)
+/**************************************************
+ *
+ * @Finalidad: Función que se ejecuta en el proceso Arkham para escribir
+ *             los mensajes de log en el archivo logs.txt. Lee del pipe
+ *             y escribe en el archivo de log.
+ * @Parametros: in: pipe_fd = descriptor del pipe de comunicación.
+ * @Retorno:    ----.
+ *
+ **************************************************/
 void write_to_log(int pipe_fd) {
     
 
@@ -519,6 +629,25 @@ void write_to_log(int pipe_fd) {
     
 }
 
+/**************************************************
+ *
+ * @Finalidad: Punto de entrada del servidor Gotham. Se encarga de:
+ *             - Validar argumentos (ruta al fichero de configuración).
+ *             - Leer y parsear la configuración de Gotham (IPs y puertos de Fleck y workers).
+ *             - Iniciar el logger Arkham (fork y pipe).
+ *             - Crear y lanzar hilos para:
+ *                 * Aceptar conexiones de clientes Fleck (funcThreadFleckConnecter).
+ *                 * Aceptar conexiones de workers (funcThreadWorkerConnecter).
+ *             - Mantener el servicio activo hasta recibir SIGINT.
+ *             - Al cerrar, invocar doLogout() y esperar a que terminen los hilos.
+ * @Parametros: in: argc = número de argumentos (debe ser 2).
+ *              in: argv = vector de cadenas:
+ *                     argv[0] = nombre del ejecutable,
+ *                     argv[1] = ruta al fichero de configuración de Gotham.
+ * @Retorno:    0 si finaliza sin errores tras desconectar todas las sesiones;
+ *             distinto de 0 en caso de fallo de argumentos, configuración o inicialización.
+ *
+ **************************************************/
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         write(STDOUT_FILENO, "Usage: Gotham <config_file>\n", 28);
