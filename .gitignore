@@ -5,3 +5,4 @@ bin/
 *.o
 .vscode/settings.json
 .gitignore
+SO2025.tar.gz

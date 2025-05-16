@@ -174,9 +174,7 @@ int DISTORSION_compressText(char *input_file_path, int word_limit) {
  *              in:     stop_signal = puntero a una sig atómica que, si se activa,
  *                                 indica interrupción inmediata del proceso.
  * @Retorno:    0 en caso de éxito completo;
- *             <0 en caso de error (por ejemplo, fallo de E/S en socket,
- *             error en el checksum, fallo de compresión o señal de parada).
- *
+ *             <0 en caso de error
  **************************************************/
 int DISTORSION_distortFile(listElement2* element, volatile sig_atomic_t *stop_signal) {
     pthread_mutex_t myMutex = PTHREAD_MUTEX_INITIALIZER;

@@ -61,8 +61,7 @@ void free_config() {
  *
  * @Finalidad: Leer mensajes de la cola de comunicación (message queue)
  *             e insertar cada nueva tarea en la lista linkedlist.
- *             Se utiliza para procesar eventos entrantes de distintos tipos
- *             (por ejemplo, notificaciones de crash o reasignaciones).
+ *             Se utiliza para procesar eventos entrantes de distintos tipos.
  * @Parametros: in/out: listW = instancia de LinkedList2 donde agregar los elementos
  *                             recibidos de la cola.
  *              in:     type  = entero que indica la categoría de mensaje a leer
