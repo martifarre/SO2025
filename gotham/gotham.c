@@ -273,7 +273,7 @@ void* funcThreadFleckConnecter() {
         }
 
         pthread_t thread_newFleck;
-        (&thread_newFleck, NULL, threadFleck, &newsock);pthread_create
+        pthread_create(&thread_newFleck, NULL, threadFleck, &newsock);
     }
 }
 
