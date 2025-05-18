@@ -60,7 +60,7 @@ void free_config() {
  **************************************************/
 char *read_command(int *words) {
     int read_bytes;
-    print_text("\n");
+    print_text("\n$");
     STRING_read_line(STDIN_FILENO, &read_bytes, &global_cmd);
     global_cmd = STRING_to_upper_case(global_cmd);
     STRING_replace(global_cmd, '\n', '\0');

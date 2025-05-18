@@ -709,7 +709,6 @@ int main(int argc, char *argv[]) {
     free(data);
 
     increment_worker_count();
-    int a = get_worker_count();
     struct trama wtrama;
     if(TRAMA_readMessageFromSocket(sockfd, &wtrama) < 0) {
         write(STDOUT_FILENO, "Error: Checksum not validated.\n", 32);

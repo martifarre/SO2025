@@ -2,6 +2,7 @@
 bin/
 
 # Ignore all object files
+!modules/SO_compression.o
 *.o
 .vscode/settings.json
 .gitignore
